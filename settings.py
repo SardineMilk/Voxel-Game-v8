@@ -8,6 +8,7 @@ from random import randint
 GRAB_MOUSE = True  # Hide the mouse and lock it to the centre of the window
 PROFILE = True  # Activate the profiler
 WIREFRAME = False  # Render a wireframe instead of the filled faces
+INSERTION_SORT = True
 
 # The width and height of the window the game is displayed on
 WIDTH, HEIGHT = 1920, 1080

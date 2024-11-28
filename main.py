@@ -49,20 +49,20 @@ class World:
 
     def getVoxel(self, position):
         chunk_position, local_position = self.__worldToLocal(position)
-        chunk = self.getChunk(chunk_position)
+        chunk = self.__getChunk(chunk_position)
         voxel = chunk.getVoxel(local_position)
         return voxel
 
     def setVoxel(self, position, type):
         chunk_position, local_position = self.__worldToLocal(position)
-        chunk = self.getChunk(chunk_position)
+        chunk = self.__getChunk(chunk_position)
         chunk.setVoxel(local_position, type)
 
-    def getChunk(self, position):
+    def __getChunk(self, position):
         # If the chunk doesn't exist, load it
         chunk_index = self.__getChunkIndex(position)
         if chunk_index == None:
-            self.loadChunk(position)
+            self.__loadChunk(position)
             # loadChunk appends the chunk to the end of self.chunks
             # So it will be the last item in the list
             return self.chunks[-1]
@@ -92,7 +92,7 @@ class World:
             mesh += chunk.constructMesh()
         return mesh
     
-    def loadChunk(self, position):
+    def __loadChunk(self, position):
         # TODO - file opening
         self.chunks.append(Chunk(position))
 
@@ -101,81 +101,134 @@ class Chunk:
     def __init__(self, position):
         # Index of the chunk in 3d space - Tuple
         self.position = tuple(position)
-        # Types of the voxels contained in the chunk - 3d numpy array of integers
-        self.voxels = np.zeros((CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE), dtype=int)
+        # Types of the voxels contained in the chunk - A flattened 1d numpy array of integers
+        # It is stored this way for efficieny 
+        self.voxels = np.zeros(CHUNK_VOLUME, dtype=int)
     
     def getVoxel(self, position):
         x, y, z = position
-
         # Range check - If it's outside the chunk, we return 0
         if ((0 <= x < CHUNK_SIZE) and
             (0 <= y < CHUNK_SIZE) and
             (0 <= z < CHUNK_SIZE)):
 
-            return self.voxels[int(x), int(y), int(z)]
+            index = self.__ToFlat(position)
+            return self.voxels[index]
 
-        return 0
-
-        
+        return 0   
     
     def setVoxel(self, position, type):
         x, y, z = position
-        x, y, z = int(x), int(y), int(z)
-
         # Range check - Is it inside the chunk?
         if (0 <= x <= CHUNK_SIZE - 1 or 
             0 <= y <= CHUNK_SIZE - 1 or
             0 <= z <= CHUNK_SIZE - 1):
-                self.voxels[x, y, z] = type
+                index = self.__ToFlat(position)
+                self.voxels[index] = type
 
     def constructMesh(self):
+        """
+        This constructs the chunk mesh
+        It takes the form of a list, with each element being:
+        tuple(voxel_world_pos, voxel_type, face_index)
+
+        The face_index determines which side of the voxel the face belongs to, with the lookup table stored in settings.py
+        TODO move from settings.py
+
+        The voxel_type is technically uneeded, as world.getVoxel(voxel_world_pos) can be called to get the type
+        However, it gives a massive performance boost
+        """
+
+        chunk_offset = pg.Vector3(self.position)*CHUNK_SIZE
+
         mesh = []
         filtered_voxels = np.argwhere(self.voxels != 0)
-        for voxel_pos in filtered_voxels:
-            voxel_pos = pg.Vector3(tuple(voxel_pos))
+        for voxel_index in filtered_voxels:
+            voxel_pos = pg.Vector3(self.__To3d(voxel_index))
             for face_index, face_normal in enumerate(FACE_NORMALS):
                 # Interior Face Culling
                 check_pos = voxel_pos + face_normal
 
-                try:
-                    neighbour_type = self.getVoxel(check_pos)
-                except IndexError:
-                    # TODO - neighbouring chunks
-                    neighbour_type = 0
+                neighbour_type = self.getVoxel(check_pos)
 
                 if neighbour_type == 0:
-                    voxel_world_pos = tuple((pg.Vector3(self.position)*CHUNK_SIZE+pg.Vector3(voxel_pos)))
-                    mesh.append((voxel_world_pos, face_index))
+                    voxel_world_pos = tuple((chunk_offset + pg.Vector3(voxel_pos)))
+
+                    voxel_type = self.getVoxel(voxel_pos)
+
+                    mesh.append((voxel_world_pos, voxel_type, face_index))
         return mesh
+
+    def __ToFlat(self, position):
+        """
+        This function is used when converting from local chunk positions to indices to access data in the chunk array
+        """
+        # Convert a 3d position to a 1d index
+        index = position[0] + (position[1] * CHUNK_SIZE) + (position[2] * CHUNK_AREA)
+        return int(index)
+    
+    def __To3d(self, index):
+        """
+        This function converts from an index in the chunk array to a 3d position in the chunk
+        """
+
+        # Convert a 1d index to a 3d position
+        index = int(index[0])  # index[0] because index is a numpy array, so it shouldnt be directly converted
+        z = int(index / CHUNK_AREA)
+        index -= z * CHUNK_AREA
+
+        y = int(index / CHUNK_SIZE)
+
+        x = int(index % CHUNK_SIZE)     
+
+        return (x, y, z)   
 
 
 class Renderer:
+    """
+    This class's purpose is to take in the mesh and render the faces to the screen.
+    This involves:
+        - Sorting the mesh
+        - Culling the mesh
+            - Backface culling
+            - Frustum culling
+        - Processing the mesh
+            - Translating
+            - Rotating
+            - Projecting
+        - Drawing the mesh
+
+    """
+
     def __init__(self, surface) -> None:
         # The surface the renderer will draw on
         self.surface = surface
     
     def render(self, mesh):
-        sorted_mesh = self.sortVoxels(mesh)
-        # Process the voxels
-        processed_mesh = list(map(self.processFace, sorted_mesh))  # List of quads and colours that must be drawn
-        processed_mesh = filter(None, processed_mesh)
 
-        # Render
-        self.surface.fill((32, 32, 32))
+        sorted_mesh = self.__sortVoxels(mesh)
+        # Process the voxels
+        processed_mesh = list(map(self.__processFace, sorted_mesh))  # List of quads and colours that must be drawn
+        processed_mesh = filter(None, processed_mesh)
 
         if WIREFRAME:
             [gfxdraw.aapolygon(self.surface, points, WIREFRAME_COLOR) for points, color in processed_mesh]
 
         [pg.draw.polygon(self.surface, color, points) for points, color in processed_mesh]
         
-    def processFace(self, face):
-        voxel_position, face_index = face
-        voxel_type = world.getVoxel(voxel_position)
+    def __processFace(self, face):
+        """
+        - Translate face
+        If face is visible:
+        - Rotate
+        - Project
+        """
+        voxel_position, voxel_type, face_index = face
         processed_face = []
 
         relative_voxel_position = voxel_position - camera.position
 
-        is_visible = self.checkVisibility(relative_voxel_position, face_index)
+        is_visible = self.__checkVisibility(relative_voxel_position, face_index)
 
         if not is_visible:
             return None
@@ -195,14 +248,14 @@ class Renderer:
             if vertex.z <= FRUSTUM_TOLERANCE:
                 return None
 
-            projected_vertex = self.project_vertex(vertex)
+            projected_vertex = self.__project_vertex(vertex)
 
             processed_face.append(projected_vertex)
 
         voxel_color = voxel_types[int(voxel_type) - 1]
         return (tuple(processed_face), voxel_color)
 
-    def checkVisibility(self, voxel_position, face_index):
+    def __checkVisibility(self, voxel_position, face_index):
         """
         This function performs backface culling
         Backface culling - Cull faces where the normal isn't pointing towards the camera i.e facing away
@@ -225,13 +278,35 @@ class Renderer:
 
         return is_visible
     
-    def project_vertex(self, vertex):
+    def __project_vertex(self, vertex):
+        """
+        As the z value of a vertex increases, it moves towards the centre of the screen
+        We then multiply by half of the width|height to scale to the size of the window
+        """
+
         x = ((vertex.x / vertex.z) + 1) * CENTRE[0]
         y = ((vertex.y / vertex.z) + 1) * CENTRE[1]
 
         return (x, y)
     
-    def sortVoxels(self, mesh):
+    def __sortVoxels(self, mesh):
+        if INSERTION_SORT:
+            # Traverse the mesh starting from the second face
+            for i in range(1, len(mesh)):
+                # Store the current face to be compared
+                current_face = mesh[i]
+                current_distance = (mesh[i][0]-camera.position).length_squared()
+                # Initialize the position for comparison
+                j = i - 1
+                
+                # Move the face that is closer one position ahead
+                while j >= 0 and (mesh[j][0]-camera.position).length_squared() > current_distance:
+                    mesh[j + 1] = mesh[j]
+                    j -= 1
+                
+                # Place the current face in its correct position
+                mesh[j + 1] = current_face
+            return mesh
         return sorted(mesh, key=lambda position: (position[0]-camera.position).length_squared())[::-1]
 
 
@@ -246,8 +321,7 @@ renderer = Renderer(screen)
 
 for i in range(32):
     for j in range(32):
-        for k in range(32):
-            world.setVoxel((i, j, k), randint(1, 3))
+            world.setVoxel((i, 0, j), randint(1, 3))
 
 
 # Mouse lock
@@ -258,7 +332,7 @@ if GRAB_MOUSE:
 geometry_changed = True
 
 running = True
-while running and pg.time.get_ticks() <= 5000:
+while running:
     # Time and frame rate
     current_time = pg.time.get_ticks()
     delta = clamp(current_time - previous_time, 1, 9999)
@@ -282,6 +356,8 @@ while running and pg.time.get_ticks() <= 5000:
         voxels_mesh = world.constructMesh()
         geometry_changed = False
 
+    # Render
+    screen.fill((32, 32, 32))
     renderer.render(voxels_mesh)
 
     pg.display.flip()
