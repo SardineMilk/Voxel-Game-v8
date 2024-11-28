@@ -2,7 +2,7 @@ from settings import *
 
 if PROFILE:
     import profiler
-    profiler.profiler().start(True)
+    profiler.profiler(sortby="tottime").start(True)
 
 
 class Camera:
@@ -45,13 +45,78 @@ class Camera:
 class World:
     def __init__(self):
         self.chunks = []
-        self.chunks.append(Chunk(0, 0, 0))
+        self.chunks.append(Chunk((0, 0, 0)))
+
+    def getVoxel(self, position):
+        chunk_position, local_position = self.__worldToLocal(position)
+        chunk = self.getChunk(chunk_position)
+        voxel = chunk.getVoxel(local_position)
+        return voxel
+
+    def setVoxel(self, position, type):
+        chunk_position, local_position = self.__worldToLocal(position)
+        chunk = self.getChunk(chunk_position)
+        chunk.setVoxel(local_position, type)
+
+    def getChunk(self, position):
+        # If the chunk doesn't exist, load it
+        chunk_index = self.__getChunkIndex(position)
+        if chunk_index == None:
+            self.loadChunk(position)
+            # loadChunk appends the chunk to the end of self.chunks
+            # So it will be the last item in the list
+            return self.chunks[-1]
+
+        return self.chunks[chunk_index]
+
+    def __getChunkIndex(self, position) -> int|None:
+        # From a chunk position, get the 
+        # Index of the chunk in the array of loaded chunks
+        for index, chunk in enumerate(self.chunks):
+            if chunk.position == tuple(position):  
+                return index
+        return None
+
+    def __worldToLocal(self, position) -> tuple[list[int, int, int], list[int, int, int]]:
+        # Convert a world position to a local position
+        # Position of the chunk in 3d space
+        chunk_index = [position[0] // CHUNK_SIZE, position[1] // CHUNK_SIZE, position[2] // CHUNK_SIZE]
+        # Index of the voxel within the chunk
+        local_index = [position[0] % CHUNK_SIZE, position[1] % CHUNK_SIZE, position[2] % CHUNK_SIZE]
+
+        return chunk_index, local_index
+
+    def constructMesh(self):
+        mesh = []
+        for chunk in self.chunks:
+            mesh += chunk.constructMesh()
+        return mesh
+    
+    def loadChunk(self, position):
+        # TODO - file opening
+        self.chunks.append(Chunk(position))
 
 
 class Chunk:
     def __init__(self, position):
-        self.position = position
-        self.voxels = np.zeros((CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE))
+        # Index of the chunk in 3d space - Tuple
+        self.position = tuple(position)
+        # Types of the voxels contained in the chunk - 3d numpy array of integers
+        self.voxels = np.zeros((CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE), dtype=int)
+    
+    def getVoxel(self, position):
+        x, y, z = position
+
+        # Range check - If it's outside the chunk, we return 0
+        if ((0 <= x < CHUNK_SIZE) and
+            (0 <= y < CHUNK_SIZE) and
+            (0 <= z < CHUNK_SIZE)):
+
+            return self.voxels[int(x), int(y), int(z)]
+
+        return 0
+
+        
     
     def setVoxel(self, position, type):
         x, y, z = position
@@ -63,18 +128,6 @@ class Chunk:
             0 <= z <= CHUNK_SIZE - 1):
                 self.voxels[x, y, z] = type
 
-    def getVoxel(self, position):
-        x, y, z = position
-        x, y, z = int(x), int(y), int(z)
-
-        # Range check - If it's outside the chunk, we return 0
-        if ((0 > x or x > CHUNK_SIZE - 1) or 
-            (0 > y or y > CHUNK_SIZE - 1) or
-            (0 > z or z > CHUNK_SIZE - 1)):
-            return 0
-
-        return self.voxels[x, y, z]
-    
     def constructMesh(self):
         mesh = []
         filtered_voxels = np.argwhere(self.voxels != 0)
@@ -91,11 +144,16 @@ class Chunk:
                     neighbour_type = 0
 
                 if neighbour_type == 0:
-                    mesh.append((voxel_pos, face_index))
+                    voxel_world_pos = tuple((pg.Vector3(self.position)*CHUNK_SIZE+pg.Vector3(voxel_pos)))
+                    mesh.append((voxel_world_pos, face_index))
         return mesh
 
 
 class Renderer:
+    def __init__(self, surface) -> None:
+        # The surface the renderer will draw on
+        self.surface = surface
+    
     def render(self, mesh):
         sorted_mesh = self.sortVoxels(mesh)
         # Process the voxels
@@ -103,12 +161,12 @@ class Renderer:
         processed_mesh = filter(None, processed_mesh)
 
         # Render
-        screen.fill((32, 32, 32))
+        self.surface.fill((32, 32, 32))
 
         if WIREFRAME:
-            [gfxdraw.aapolygon(screen, points, (0, 255, 0)) for points, color in processed_mesh]
+            [gfxdraw.aapolygon(self.surface, points, WIREFRAME_COLOR) for points, color in processed_mesh]
 
-        [pg.draw.polygon(screen, color, points) for points, color in processed_mesh]
+        [pg.draw.polygon(self.surface, color, points) for points, color in processed_mesh]
         
     def processFace(self, face):
         voxel_position, face_index = face
@@ -139,19 +197,21 @@ class Renderer:
 
             projected_vertex = self.project_vertex(vertex)
 
-
             processed_face.append(projected_vertex)
 
-        
-        if len(processed_face) != 4:
-            return None
-        
         voxel_color = voxel_types[int(voxel_type) - 1]
         return (tuple(processed_face), voxel_color)
 
     def checkVisibility(self, voxel_position, face_index):
+        """
+        This function performs backface culling
+        Backface culling - Cull faces where the normal isn't pointing towards the camera i.e facing away
+        """
         face_normal = FACE_NORMALS[face_index]
 
+        # By default, the voxel origin is the bottom front left corner.
+        # If we leave it here, it will cause errors with backface culling
+        # It is already relative to the camera
         voxel_centre = voxel_position + pg.Vector3(0.5, 0.5, 0.5)
 
         # Dot product of the face normal to the camera vector
@@ -164,7 +224,7 @@ class Renderer:
         is_visible = face_to_camera <= -0.5
 
         return is_visible
-
+    
     def project_vertex(self, vertex):
         x = ((vertex.x / vertex.z) + 1) * CENTRE[0]
         y = ((vertex.y / vertex.z) + 1) * CENTRE[1]
@@ -181,20 +241,24 @@ clock = pg.time.Clock()
 previous_time = 0
 
 camera = Camera((0, 0, 0), (0, 0, 0))
-world = Chunk((0, 0, 0))
-renderer = Renderer()
+world = World()
+renderer = Renderer(screen)
 
-for i in range(CHUNK_SIZE):
-    for j in range(CHUNK_SIZE):
-            world.setVoxel((i, 0, j), randint(0, 4))
+for i in range(32):
+    for j in range(32):
+        for k in range(32):
+            world.setVoxel((i, j, k), randint(1, 3))
 
 
 # Mouse lock
-pg.mouse.set_visible(False)
-pg.event.set_grab(True)
+if GRAB_MOUSE:
+    pg.mouse.set_visible(False)
+    pg.event.set_grab(True)
+
+geometry_changed = True
 
 running = True
-while running:
+while running and pg.time.get_ticks() <= 5000:
     # Time and frame rate
     current_time = pg.time.get_ticks()
     delta = clamp(current_time - previous_time, 1, 9999)
@@ -214,7 +278,9 @@ while running:
     camera.moveCamera(keys, 1/delta)
 
     # Construct the mesh
-    voxels_mesh = world.constructMesh()
+    if geometry_changed:
+        voxels_mesh = world.constructMesh()
+        geometry_changed = False
 
     renderer.render(voxels_mesh)
 

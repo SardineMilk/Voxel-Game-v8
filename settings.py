@@ -5,9 +5,9 @@ from pygame import gfxdraw
 from random import randint
 
 # Debug tools
-GRAB_MOUSE = True
-PROFILE = False
-WIREFRAME = False   
+GRAB_MOUSE = True  # Hide the mouse and lock it to the centre of the window
+PROFILE = True  # Activate the profiler
+WIREFRAME = False  # Render a wireframe instead of the filled faces
 
 # The width and height of the window the game is displayed on
 WIDTH, HEIGHT = 1920, 1080
@@ -16,6 +16,7 @@ CENTRE = (WIDTH//2, HEIGHT//2)
 ASPECT_RATIO = WIDTH / HEIGHT
 
 BACKGROUND_COLOR = (32, 32, 32)
+WIREFRAME_COLOR = (0, 127, 0)
 
 # The maximum number of times the main loop can run per second
 MAX_FPS = 60    
