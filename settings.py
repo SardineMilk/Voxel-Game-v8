@@ -6,9 +6,9 @@ from random import randint
 
 # Debug tools
 GRAB_MOUSE = True  # Hide the mouse and lock it to the centre of the window
-PROFILE = True  # Activate the profiler
+PROFILE = True # Activate the profiler
 WIREFRAME = False  # Render a wireframe instead of the filled faces
-INSERTION_SORT = True
+INSERTION_SORT = False
 
 # The width and height of the window the game is displayed on
 WIDTH, HEIGHT = 1920, 1080
@@ -32,12 +32,11 @@ CHUNK_VOLUME = CHUNK_SIZE**3
 PLAYER_SPEED = 5  # Voxels per second
 PLAYER_ROTATION_SENSITIVITY = 50
 VERTICAL_FOV = 1  # (Radians)
-RENDER_DISTANCE = 1
+RENDER_DISTANCE = 3
 
 # Clipping planes
 NEAR = 0.1
-FAR = 1000
-FRUSTUM_TOLERANCE = 0.1
+FAR = 10000
 
 def clamp(n, minn, maxn):
     return max(minn, min(n, maxn))
