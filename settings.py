@@ -33,14 +33,13 @@ CHUNK_VOLUME = CHUNK_SIZE**3
 # World Generation
 OCTAVES = 2
 SEED = 10247
-NOISE = PerlinNoise(octaves=OCTAVES, seed=SEED)
 
 
 # Player variables
 PLAYER_SPEED = 5  # Voxels per second
 PLAYER_ROTATION_SENSITIVITY = 50
 VERTICAL_FOV = 1  # (Radians)
-RENDER_DISTANCE = 3
+RENDER_DISTANCE =3
 
 # Clipping planes
 NEAR = 0.1
