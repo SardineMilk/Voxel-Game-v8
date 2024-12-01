@@ -3,11 +3,12 @@ import numpy as np
 import math
 from pygame import gfxdraw
 from random import randint
+from perlin_noise import PerlinNoise
 
 # Debug tools
 GRAB_MOUSE = True  # Hide the mouse and lock it to the centre of the window
 PROFILE = True # Activate the profiler
-WIREFRAME = False  # Render a wireframe instead of the filled faces
+WIREFRAME = False # Render a wireframe instead of the filled faces
 INSERTION_SORT = False
 
 # The width and height of the window the game is displayed on
@@ -16,6 +17,7 @@ WIDTH, HEIGHT =  1000, 1000
 CENTRE = (WIDTH//2, HEIGHT//2)
 ASPECT_RATIO = WIDTH / HEIGHT
 
+# Rendering
 BACKGROUND_COLOR = (32, 32, 32)
 WIREFRAME_COLOR = (0, 127, 0)
 
@@ -28,6 +30,12 @@ CHUNK_SIZE = 16
 CHUNK_AREA = CHUNK_SIZE**2
 CHUNK_VOLUME = CHUNK_SIZE**3
 
+# World Generation
+OCTAVES = 2
+SEED = 10247
+NOISE = PerlinNoise(octaves=OCTAVES, seed=SEED)
+
+
 # Player variables
 PLAYER_SPEED = 5  # Voxels per second
 PLAYER_ROTATION_SENSITIVITY = 50
@@ -37,6 +45,8 @@ RENDER_DISTANCE = 3
 # Clipping planes
 NEAR = 0.1
 FAR = 10000
+
+
 
 def clamp(n, minn, maxn):
     return max(minn, min(n, maxn))

@@ -89,34 +89,12 @@ class World:
         mesh = []
         for chunk in self.chunks:
             mesh += chunk.constructMesh()
-        return mesh
+        return np.array(mesh, dtype=Face)
     
     def __loadChunk(self, position):
         # TODO - file opening
         self.chunks.append(Chunk(position))
 
-    """
-    def updateRenderedChunks(self, player_pos):
-        changed = False
-        #TODO add unloading
-        for i in range(RENDER_DISTANCE ** 3):
-            # Generate an [x, y, z] index in a cube pattern
-            x = i % RENDER_DISTANCE
-            y = (i // RENDER_DISTANCE) % RENDER_DISTANCE
-            z = i // RENDER_DISTANCE ** 2
-
-            # Shift so chunks generate centred on the player
-            x = int((player_pos.x//CHUNK_SIZE) + x)
-            y = int((player_pos.y//CHUNK_SIZE) + y)
-            z = int((player_pos.z//CHUNK_SIZE) + z)
-
-            loaded_chunk_position = [x, y, z]
-            if self.__getChunkIndex(loaded_chunk_position) == None:
-                self.__loadChunk(loaded_chunk_position)
-                changed = True
-        if changed:
-            self.mesh = self.constructMesh()
-        """
     def updateRenderedChunks(self, player_pos):
         changed = False
         chunks_to_load = []
@@ -148,6 +126,7 @@ class World:
 
         if changed:
             self.mesh = self.constructMesh()
+
 
 class Chunk:
     def __init__(self, position):
@@ -237,16 +216,19 @@ class Chunk:
 
     def procGen(self):
         voxels = np.zeros(CHUNK_VOLUME, dtype=int)
-
-
         for i in range(CHUNK_SIZE):
             for j in range(CHUNK_SIZE):
-                index = self.__ToFlat((i, 0, j))
-                if self.position[1] == 0:
-                    voxels[index] = 4
-
-
+                y = self.getHeight((i, j))
+                chunk_location = y//CHUNK_SIZE
+                if self.position[1] == chunk_location:
+                    y -= chunk_location*CHUNK_SIZE
+                    index = self.__ToFlat((i, y, j))
+                    voxels[index] = randint(1, 3)
         return voxels
+
+    def getHeight(self, position: tuple[int, int]):
+        return int(NOISE(((position[0]/CHUNK_SIZE)+self.position[0]*CHUNK_SIZE, (position[1]/CHUNK_SIZE)+self.position[2]*CHUNK_SIZE))*3)
+    
 
 class Renderer:
     """
@@ -266,20 +248,32 @@ class Renderer:
     def __init__(self, surface) -> None:
         # The surface the renderer will draw on
         self.surface = surface
+
+        # We vectorise the processFace function using Numpy for performance reasons
+        self.processMesh = np.vectorize(self.__processFace, otypes=[Face])
+        # Vectorise the drawFace function
+        self.drawMesh = np.vectorize(self.drawFace)
     
     def render(self, mesh):
-
-        sorted_mesh = self.__sortVoxels(mesh)
+        if INSERTION_SORT:
+            sorted_mesh = self.__sortMesh(mesh)
+        else:
+            sorted_mesh = mesh[np.argsort([-(face.position-camera.position).length_squared() for face in mesh])]
         # Process the voxels
-        processed_mesh = list(map(self.__processFace, sorted_mesh))  # List of quads and colours that must be drawn
-        processed_mesh = filter(None, processed_mesh)
+        
+        processed_mesh = self.processMesh(sorted_mesh)
+        # Filter out None type - Faces that were culled in the processMesh function
+        processed_mesh = processed_mesh[processed_mesh != None]
+        #processed_mesh = list(map(self.__processFace, sorted_mesh))  # List of quads and colours that must be drawn
+        #wwaprocessed_mesh = filter(None, processed_mesh)
 
         if WIREFRAME:
             [gfxdraw.aapolygon(self.surface, points, WIREFRAME_COLOR) for points, color in processed_mesh]
 
-        [pg.draw.polygon(self.surface, color, points) for points, color in processed_mesh]
+        self.drawMesh(processed_mesh)
         
     def __processFace(self, face):
+        #TODO move into Face class
         """
         - Translate face
         If face is visible:
@@ -298,7 +292,7 @@ class Renderer:
         for vertex_index in FACES[face.index]:
             world_vertex = VERTICES[vertex_index]
             vertex = relative_voxel_position + world_vertex
-            # Scale to face size
+            # TODO Scale to face size
 
             # Roll isn't needed
 
@@ -315,7 +309,7 @@ class Renderer:
 
             processed_face.append(projected_vertex)
 
-        voxel_color = voxel_types[int(face.type) - 1]
+        voxel_color = voxel_types[face.type - 1]
         return (tuple(processed_face), voxel_color)
 
     def __checkVisibility(self, voxel_position: tuple[int, int, int], face_index: int) -> bool:
@@ -352,20 +346,26 @@ class Renderer:
 
         return (x, y)
     
-    def __sortVoxels(self, mesh):
-        if INSERTION_SORT:
-            # Traverse the mesh starting from the second face
-            for i in range(1, len(mesh)):
-                current_face = mesh[i]
-                j = i-1
-                # If the distance to the comparison face is less than current_face, swap them
-                while j >=0 and (((current_face.position-camera.position).length_squared()) >= ((mesh[j].position-camera.position).length_squared())):
-                    mesh[j+1] = mesh[j]
-                    j -= 1
-                mesh[j+1] = current_face
-            return mesh
-        
-        return sorted(mesh, key=lambda position: (position.position-camera.position).length_squared())[::-1]
+    def __sortMesh(self, mesh):
+        """
+        Custom Insertion Sort algorithm that runs if the setting INSERTION_SORT is set to True
+        """
+        # Traverse the mesh starting from the second face
+        for i in range(1, len(mesh)):
+            current_face = mesh[i]
+            j = i-1
+            # If the distance to the comparison face is less than current_face, swap them
+            while j >=0 and (((current_face.position-camera.position).length_squared()) >= ((mesh[j].position-camera.position).length_squared())):
+                mesh[j+1] = mesh[j]
+                j -= 1
+            mesh[j+1] = current_face
+        return np.array(mesh)
+    
+        #return sorted(mesh, key=lambda position: (position.position-camera.position).length_squared())[::-1]
+
+    def drawFace(self, face):
+        points, color = face
+        pg.draw.polygon(self.surface, color, points)
 
 
 class Face:
@@ -418,6 +418,7 @@ while running:
     renderer.render(world.mesh)
 
     print(fps)
+
     pg.display.flip()
     clock.tick(MAX_FPS)
 
