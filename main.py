@@ -218,12 +218,11 @@ class Chunk:
         voxels = np.zeros(CHUNK_VOLUME, dtype=int)
         for i in range(CHUNK_SIZE):
             for j in range(CHUNK_SIZE):
-                y = world_generator.sample((i+self.position[0]*CHUNK_SIZE, j+self.position[2]*CHUNK_SIZE))
-                chunk_location = y//CHUNK_SIZE
-                if self.position[1] == chunk_location:
-                    y -= chunk_location*CHUNK_SIZE
-                    index = self.__ToFlat((i, y, j))
-                    voxels[index] = randint(1, 3)
+                if self.position[1] == 0:
+                    index = self.__ToFlat((i, 0, j))
+                    voxel_type =(math.sin(i*(0.1+self.position[0]))+math.sin(j*(0.1+self.position[2])))%4 +1
+                    voxel_type = randint(1, 3)
+                    voxels[index] = voxel_type
         return voxels
 
 
@@ -253,6 +252,8 @@ class Renderer:
     
     def render(self, mesh):
         # TODO crashes w 0 len mesh bc of vectorize
+        if len(mesh) == 0:
+            return
         
         if INSERTION_SORT:
             sorted_mesh = self.__sortMesh(mesh)
@@ -266,13 +267,13 @@ class Renderer:
         #processed_mesh = list(map(self.__processFace, sorted_mesh))  # List of quads and colours that must be drawn
         #processed_mesh = filter(None, processed_mesh)
 
-        if len(mesh) == 0:
+        if len(processed_mesh) == 0:
             return
 
         if WIREFRAME:
             [gfxdraw.aapolygon(self.surface, points, WIREFRAME_COLOR) for points, color in processed_mesh]
-
-        self.drawMesh(processed_mesh)
+        else:
+            self.drawMesh(processed_mesh)
         
     def __processFace(self, face):
         #TODO move into Face class
@@ -282,21 +283,19 @@ class Renderer:
         - Rotate
         - Project
         """
-        processed_face = []
+        processed_face = [0]*4
 
         relative_voxel_position = face.position - camera.position
 
-        is_visible = self.__checkVisibility(relative_voxel_position, face.index)
+        is_visible = self.__checkVisibility(tuple(relative_voxel_position), tuple(FACE_NORMALS[face.index]))
 
         if not is_visible:
             return None
         
-        for vertex_index in FACES[face.index]:
-            world_vertex = VERTICES[vertex_index]
+        for i, vertex_index in enumerate(FACES[face.index]):
+            world_vertex = VERTICES[vertex_index]  # Indexes into the VERTICES array
             vertex = relative_voxel_position + world_vertex
             # TODO Scale to face size
-
-            # Roll isn't needed
 
             # Rotate Pitch - Y
             vertex = vertex.rotate(-camera.rotation.x, pg.Vector3(0, 1, 0))
@@ -307,44 +306,49 @@ class Renderer:
             if vertex.z <= NEAR or vertex.z >= FAR:
                 return None
 
-            projected_vertex = self.__project_vertex(vertex)
+            projected_vertex = self.__project_vertex(tuple(vertex), CENTRE)
 
-            processed_face.append(projected_vertex)
+            processed_face[i] = projected_vertex
 
-        voxel_color = voxel_types[face.type - 1]
-        return (tuple(processed_face), voxel_color)
+        return (tuple(processed_face), face.colour)
 
-    def __checkVisibility(self, voxel_position: tuple[int, int, int], face_index: int) -> bool:
+    @staticmethod
+    @njit
+    def __checkVisibility(voxel_position: tuple[int, int, int], face_normal) -> bool:
         """
         This function performs backface culling
         Backface culling - Cull faces where the normal isn't pointing towards the camera i.e facing away
         """
-        face_normal = FACE_NORMALS[face_index]
 
         # By default, the voxel origin is the bottom front left corner.
         # If we leave it here, it will cause errors with backface culling
         # It is already relative to the camera
-        voxel_centre = voxel_position + pg.Vector3(0.5, 0.5, 0.5)
 
         # Dot product of the face normal to the camera vector
         # If this is positive, they are pointing in roughly the same direction - <90 degrees
         # If it's negative, they are pointing roughly away from each other - >90 degrees
-        # 3blue1brown has a wonderful linear algebra video explaining this: https://www.youtube.com/watch?v=LyGKycYT2v0
-        face_to_camera = np.dot(face_normal, voxel_centre)
+        # 3blue1brown has a wonderful linear algebra video explaining this: https://www.youtube.com/watch?v=LyGKycYT2v0 
+        face_to_camera = (
+            face_normal[0] * voxel_position[0] +
+            face_normal[1] * voxel_position[1] +
+            face_normal[2] * voxel_position[2]
+        )
 
         # Use a slight bias to prevent shapes being culled too aggressively
         is_visible = (face_to_camera <= -0.5)
 
         return is_visible
     
-    def __project_vertex(self, vertex) -> tuple[int, int]:
+    @staticmethod
+    @njit
+    def __project_vertex(vertex, CENTRE) -> tuple[int, int]:
         """
         As the z value of a vertex increases, it moves towards the centre of the screen
         We then multiply by half of the width|height to scale to the size of the window
         """
 
-        x = ((vertex.x / vertex.z) + 1) * CENTRE[0]
-        y = ((vertex.y / vertex.z) + 1) * CENTRE[1]
+        x = ((vertex[0] / vertex[2]) + 1) * CENTRE[0]
+        y = ((vertex[1] / vertex[2]) + 1) * CENTRE[1]
 
         return (x, y)
     
@@ -362,8 +366,6 @@ class Renderer:
                 j -= 1
             mesh[j+1] = current_face
         return np.array(mesh)
-    
-        #return sorted(mesh, key=lambda position: (position.position-camera.position).length_squared())[::-1]
 
     def __drawFace(self, face):
         points, color = face
@@ -374,33 +376,18 @@ class Face:
     def __init__(self, position: tuple[int, int, int], index: int, type: int) -> None:
         self.position = position  # (x,y,z) of the origin of the face
         self.index = index  # Index of the face - Indexes into FACE_NORMALS
-        self.type = type  # Type of face - Indexes into VOXEL_TYPES
-
-
-class WorldGenerator:
-    def __init__(self, seed, octaves) -> None:
-        self.seed = seed
-        self.noise = PerlinNoise(octaves=OCTAVES, seed=SEED)
-    
-    def sample(self, position: tuple[int, int, int]):
-        y = self.getHeight(position)
-        
-        return y
-
-    def getHeight(self, position: tuple[int, int]):
-        return int(self.noise((1/(position[0]/CHUNK_SIZE+0.01), 1/(position[1]/CHUNK_SIZE+0.01))*3))
-    
+        self.colour = voxel_types[type - 1]
 
 
 pg.init()
-screen = pg.display.set_mode((WIDTH, HEIGHT))
+
+screen = pg.display.set_mode((WIDTH, HEIGHT), flags=pg.DOUBLEBUF)
 clock = pg.time.Clock()
 previous_time = 0
 
 camera = Camera((0, -10, 0), (0, 0, 0))
 world = World()
 renderer = Renderer(screen)
-world_generator = WorldGenerator(SEED, OCTAVES)
 
 # Mouse lock
 if GRAB_MOUSE:
@@ -410,7 +397,7 @@ if GRAB_MOUSE:
 geometry_changed = True
 
 running = True
-while running:
+while running and previous_time <= 5000:
     # Time and frame rate
     current_time = pg.time.get_ticks()
     delta = clamp(current_time - previous_time, 1, 9999)

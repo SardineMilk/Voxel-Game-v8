@@ -4,6 +4,7 @@ import math
 from pygame import gfxdraw
 from random import randint
 from perlin_noise import PerlinNoise
+from numba import njit
 
 # Debug tools
 GRAB_MOUSE = True  # Hide the mouse and lock it to the centre of the window
@@ -33,13 +34,14 @@ CHUNK_VOLUME = CHUNK_SIZE**3
 # World Generation
 OCTAVES = 2
 SEED = 10247
+NOISE = PerlinNoise(octaves=OCTAVES, seed=SEED)
 
 
 # Player variables
 PLAYER_SPEED = 5  # Voxels per second
 PLAYER_ROTATION_SENSITIVITY = 50
 VERTICAL_FOV = 1  # (Radians)
-RENDER_DISTANCE =3
+RENDER_DISTANCE = 3
 
 # Clipping planes
 NEAR = 0.1
@@ -52,14 +54,14 @@ def clamp(n, minn, maxn):
 
 
 VERTICES = [
-    pg.Vector3((0, 0, 0)),
-    pg.Vector3((1, 0, 0)),
-    pg.Vector3((1, 1, 0)),
-    pg.Vector3((0, 1, 0)),
-    pg.Vector3((0, 0, 1)),
-    pg.Vector3((1, 0, 1)),
-    pg.Vector3((1, 1, 1)),
-    pg.Vector3((0, 1, 1)),
+    pg.Vector3((-0.5, -0.5, -0.5)),
+    pg.Vector3((0.5, -0.5, -0.5)),
+    pg.Vector3((0.5, 0.5, -0.5)),
+    pg.Vector3((-0.5, 0.5, -0.5)),
+    pg.Vector3((-0.5, -0.5, 0.5)),
+    pg.Vector3((0.5, -0.5, 0.5)),
+    pg.Vector3((0.5, 0.5, 0.5)),
+    pg.Vector3((-0.5, 0.5, 0.5)),
 ]
 
 FACES = [
