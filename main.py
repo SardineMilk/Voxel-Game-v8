@@ -361,7 +361,7 @@ class Renderer:
             current_face = mesh[i]
             j = i-1
             # If the distance to the comparison face is less than current_face, swap them
-            while j >=0 and (((current_face.position-camera.position).length_squared()) >= ((mesh[j].position-camera.position).length_squared())):
+            while j >=0 and ((current_face.position-camera.position).length_squared() >= (mesh[j].position-camera.position).length_squared()):
                 mesh[j+1] = mesh[j]
                 j -= 1
             mesh[j+1] = current_face
@@ -397,7 +397,7 @@ if GRAB_MOUSE:
 geometry_changed = True
 
 running = True
-while running and previous_time <= 5000:
+while running:
     # Time and frame rate
     current_time = pg.time.get_ticks()
     delta = clamp(current_time - previous_time, 1, 9999)
