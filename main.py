@@ -270,10 +270,7 @@ class Renderer:
         if len(processed_mesh) == 0:
             return
 
-        if WIREFRAME:
-            [gfxdraw.aapolygon(self.surface, points, WIREFRAME_COLOR) for points, color in processed_mesh]
-        else:
-            self.drawMesh(processed_mesh)
+        self.drawMesh(processed_mesh)
         
     def __processFace(self, face):
         #TODO move into Face class
@@ -369,7 +366,7 @@ class Renderer:
 
     def __drawFace(self, face):
         points, color = face
-        pg.draw.polygon(self.surface, color, points)
+        pg.draw.polygon(self.surface, color, points, width=WIREFRAME)
 
 
 class Face:

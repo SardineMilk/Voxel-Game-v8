@@ -9,7 +9,7 @@ from numba import njit
 # Debug tools
 GRAB_MOUSE = True  # Hide the mouse and lock it to the centre of the window
 PROFILE = True # Activate the profiler
-WIREFRAME = False # Render a wireframe instead of the filled faces
+WIREFRAME = True # Render a wireframe instead of the filled faces
 INSERTION_SORT = False
 
 # The width and height of the window the game is displayed on
@@ -39,7 +39,7 @@ NOISE = PerlinNoise(octaves=OCTAVES, seed=SEED)
 
 # Player variables
 PLAYER_SPEED = 5  # Voxels per second
-PLAYER_ROTATION_SENSITIVITY = 50
+PLAYER_ROTATION_SENSITIVITY = 15
 VERTICAL_FOV = 1  # (Radians)
 RENDER_DISTANCE = 3
 
