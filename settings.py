@@ -6,6 +6,30 @@ from random import randint
 from perlin_noise import PerlinNoise
 from numba import njit
 
+# Import functions from c_functions
+import ctypes
+
+class Vector2D(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_int),
+                ("y", ctypes.c_int)]
+    
+class Vector3D(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_float),
+                ("y", ctypes.c_float),
+                ("z", ctypes.c_float)]
+    
+c_functions = ctypes.CDLL("./c_functions.dll")
+
+# Project Vertex
+c_functions.projectVertex.argtypes = (Vector3D, Vector2D)
+c_functions.projectVertex.restype = Vector2D
+
+# Check Visibility
+c_functions.checkVisibility.argtypes = (Vector3D, Vector3D)
+c_functions.checkVisibility.restype = ctypes.c_bool
+
+
+
 # Debug tools
 GRAB_MOUSE = True  # Hide the mouse and lock it to the centre of the window
 PROFILE = True # Activate the profiler

@@ -1,20 +1,5 @@
 from settings import *
 
-
-import ctypes
-
-class Vector2D(ctypes.Structure):
-    _fields_ = [("x", ctypes.c_int),
-                ("y", ctypes.c_int)]
-    
-c_functions = ctypes.CDLL("./c_functions.dll")
-
-c_functions.projectVertex.argtypes = (ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_int, ctypes.c_int)
-c_functions.projectVertex.restype = Vector2D
-
-c_functions.checkVisibility.argtypes = (ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_int, ctypes.c_int, ctypes.c_int,)
-c_functions.checkVisibility.restype = ctypes.c_bool
-
 if PROFILE:
     import profiler
     profiler.profiler(sortby="tottime").start(True)
@@ -299,8 +284,8 @@ class Renderer:
 
         relative_voxel_position = face.position - camera.position
 
-        is_visible = c_functions.checkVisibility(relative_voxel_position[0], relative_voxel_position[1], relative_voxel_position[2],
-                                                 int(FACE_NORMALS[face.index].x), int(FACE_NORMALS[face.index].y), int(FACE_NORMALS[face.index].z))
+        is_visible = c_functions.checkVisibility(Vector3D(relative_voxel_position[0], relative_voxel_position[1], relative_voxel_position[2]),
+                                                 Vector3D(FACE_NORMALS[face.index].x, FACE_NORMALS[face.index].y, FACE_NORMALS[face.index].z))
 
         if not is_visible:
             return None
@@ -319,7 +304,7 @@ class Renderer:
             if vertex.z <= NEAR or vertex.z >= FAR:
                 return None
 
-            projected_vertex = c_functions.projectVertex(vertex[0], vertex[1], vertex[2], CENTRE[0], CENTRE[1])
+            projected_vertex = c_functions.projectVertex(Vector3D(vertex[0], vertex[1], vertex[2]), Vector2D(CENTRE[0], CENTRE[1]))
 
             processed_face[i] = (projected_vertex.x, projected_vertex.y)
 
@@ -371,7 +356,7 @@ if GRAB_MOUSE:
 geometry_changed = True
 
 running = True
-while running and previous_time <= 5000:
+while running:
     # Time and frame rate
     current_time = pg.time.get_ticks()
     delta = clamp(current_time - previous_time, 1, 9999)
