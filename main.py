@@ -190,7 +190,7 @@ class Chunk:
                     mesh.append(Face(voxel_world_pos, face_index, voxel_type))
         return mesh
 
-    def __ToFlat(self, position:tuple[int, int, int]) -> int:
+    def __ToFlat(self, position):
         """
         This function is used when converting from local chunk positions to indices to access data in the chunk array
         """
@@ -198,7 +198,7 @@ class Chunk:
         index = position[0] + (position[1] * CHUNK_SIZE) + (position[2] * CHUNK_AREA)
         return int(index)
     
-    def __To3d(self, index:int) -> tuple[int, int, int]:
+    def __To3d(self, index):
         """
         This function converts from an index in the chunk array to a 3d position in the chunk
         """
@@ -241,7 +241,7 @@ class Renderer:
         - Drawing the mesh
 
     """
-    def __init__(self, surface) -> None:
+    def __init__(self, surface):
         # The surface the renderer will draw on
         self.surface = surface
 
@@ -251,7 +251,6 @@ class Renderer:
         self.drawMesh = np.vectorize(self.__drawFace)
     
     def render(self, mesh):
-        # TODO crashes w 0 len mesh bc of vectorize
         if len(mesh) == 0:
             return
         
@@ -280,19 +279,20 @@ class Renderer:
         - Rotate
         - Project
         """
-        processed_face = [0]*4
+        
+        world_voxel_position = face.position - camera.position
 
-        relative_voxel_position = face.position - camera.position
-
-        is_visible = c_functions.checkVisibility(Vector3D(relative_voxel_position[0], relative_voxel_position[1], relative_voxel_position[2]),
+        is_visible = c_functions.checkVisibility(Vector3D(world_voxel_position[0], world_voxel_position[1], world_voxel_position[2]),
                                                  Vector3D(FACE_NORMALS[face.index].x, FACE_NORMALS[face.index].y, FACE_NORMALS[face.index].z))
 
         if not is_visible:
             return None
         
-        for i, vertex_index in enumerate(FACES[face.index]):
-            world_vertex = VERTICES[vertex_index]  # Indexes into the VERTICES array
-            vertex = relative_voxel_position + world_vertex
+        processed_face = [0]*4
+        face_vertex_indices = FACES[face.index]
+        for i, vertex_index in enumerate(face_vertex_indices):
+            model_vertex_position = VERTICES[vertex_index]  # Indexes into the VERTICES array
+            vertex = world_voxel_position + model_vertex_position
             # TODO Scale to face size
 
             # Rotate Pitch - Y
@@ -301,16 +301,16 @@ class Renderer:
             vertex = vertex.rotate(camera.rotation.y, pg.Vector3(1, 0, 0))
 
             # Frustum Culling - Don't render if behind camera or too far away
-            if vertex.z <= NEAR or vertex.z >= FAR:
+            if vertex.z <= NEAR:
                 return None
 
+            # This function will crash if given (*, * 0) as the vertex, but due to the Frustum Culling step, that will never happen
             projected_vertex = c_functions.projectVertex(Vector3D(vertex[0], vertex[1], vertex[2]), Vector2D(CENTRE[0], CENTRE[1]))
 
             processed_face[i] = (projected_vertex.x, projected_vertex.y)
 
         return (tuple(processed_face), face.colour)
 
-    
     def __sortMesh(self, mesh):
         """
         Custom Insertion Sort algorithm that runs if the setting INSERTION_SORT is set to True
@@ -332,7 +332,7 @@ class Renderer:
 
 
 class Face:
-    def __init__(self, position: tuple[int, int, int], index: int, type: int) -> None:
+    def __init__(self, position, index, type):
         self.position = position  # (x,y,z) of the origin of the face
         self.index = index  # Index of the face - Indexes into FACE_NORMALS
         self.colour = voxel_types[type - 1]
@@ -356,6 +356,7 @@ if GRAB_MOUSE:
 geometry_changed = True
 
 running = True
+# and previous_time <= 5000
 while running:
     # Time and frame rate
     current_time = pg.time.get_ticks()

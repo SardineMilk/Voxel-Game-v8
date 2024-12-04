@@ -1,10 +1,9 @@
 import pygame as pg
 import numpy as np
 import math
-from pygame import gfxdraw
-from random import randint
 from perlin_noise import PerlinNoise
 from numba import njit
+from random import randint
 
 # Import functions from c_functions
 import ctypes
@@ -27,7 +26,6 @@ c_functions.projectVertex.restype = Vector2D
 # Check Visibility
 c_functions.checkVisibility.argtypes = (Vector3D, Vector3D)
 c_functions.checkVisibility.restype = ctypes.c_bool
-
 
 
 # Debug tools
@@ -67,9 +65,8 @@ PLAYER_ROTATION_SENSITIVITY = 15
 VERTICAL_FOV = 1  # (Radians)
 RENDER_DISTANCE = 3
 
-# Clipping planes
+# Clipping plane(s)
 NEAR = 0.1
-FAR = 10000
 
 
 
