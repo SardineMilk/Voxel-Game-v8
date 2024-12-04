@@ -1,5 +1,20 @@
 from settings import *
 
+
+import ctypes
+
+class Vector2D(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_int),
+                ("y", ctypes.c_int)]
+    
+c_functions = ctypes.CDLL("./c_functions.dll")
+
+c_functions.projectVertex.argtypes = (ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_int, ctypes.c_int)
+c_functions.projectVertex.restype = Vector2D
+
+c_functions.checkVisibility.argtypes = (ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_int, ctypes.c_int, ctypes.c_int,)
+c_functions.checkVisibility.restype = ctypes.c_bool
+
 if PROFILE:
     import profiler
     profiler.profiler(sortby="tottime").start(True)
@@ -284,7 +299,8 @@ class Renderer:
 
         relative_voxel_position = face.position - camera.position
 
-        is_visible = self.__checkVisibility(tuple(relative_voxel_position), tuple(FACE_NORMALS[face.index]))
+        is_visible = c_functions.checkVisibility(relative_voxel_position[0], relative_voxel_position[1], relative_voxel_position[2],
+                                                 int(FACE_NORMALS[face.index].x), int(FACE_NORMALS[face.index].y), int(FACE_NORMALS[face.index].z))
 
         if not is_visible:
             return None
@@ -303,51 +319,12 @@ class Renderer:
             if vertex.z <= NEAR or vertex.z >= FAR:
                 return None
 
-            projected_vertex = self.__project_vertex(tuple(vertex), CENTRE)
+            projected_vertex = c_functions.projectVertex(vertex[0], vertex[1], vertex[2], CENTRE[0], CENTRE[1])
 
-            processed_face[i] = projected_vertex
+            processed_face[i] = (projected_vertex.x, projected_vertex.y)
 
         return (tuple(processed_face), face.colour)
 
-    @staticmethod
-    @njit
-    def __checkVisibility(voxel_position: tuple[int, int, int], face_normal) -> bool:
-        """
-        This function performs backface culling
-        Backface culling - Cull faces where the normal isn't pointing towards the camera i.e facing away
-        """
-
-        # By default, the voxel origin is the bottom front left corner.
-        # If we leave it here, it will cause errors with backface culling
-        # It is already relative to the camera
-
-        # Dot product of the face normal to the camera vector
-        # If this is positive, they are pointing in roughly the same direction - <90 degrees
-        # If it's negative, they are pointing roughly away from each other - >90 degrees
-        # 3blue1brown has a wonderful linear algebra video explaining this: https://www.youtube.com/watch?v=LyGKycYT2v0 
-        face_to_camera = (
-            face_normal[0] * voxel_position[0] +
-            face_normal[1] * voxel_position[1] +
-            face_normal[2] * voxel_position[2]
-        )
-
-        # Use a slight bias to prevent shapes being culled too aggressively
-        is_visible = (face_to_camera <= -0.5)
-
-        return is_visible
-    
-    @staticmethod
-    @njit
-    def __project_vertex(vertex, CENTRE) -> tuple[int, int]:
-        """
-        As the z value of a vertex increases, it moves towards the centre of the screen
-        We then multiply by half of the width|height to scale to the size of the window
-        """
-
-        x = ((vertex[0] / vertex[2]) + 1) * CENTRE[0]
-        y = ((vertex[1] / vertex[2]) + 1) * CENTRE[1]
-
-        return (x, y)
     
     def __sortMesh(self, mesh):
         """
@@ -394,7 +371,7 @@ if GRAB_MOUSE:
 geometry_changed = True
 
 running = True
-while running:
+while running and previous_time <= 5000:
     # Time and frame rate
     current_time = pg.time.get_ticks()
     delta = clamp(current_time - previous_time, 1, 9999)

@@ -9,7 +9,7 @@ from numba import njit
 # Debug tools
 GRAB_MOUSE = True  # Hide the mouse and lock it to the centre of the window
 PROFILE = True # Activate the profiler
-WIREFRAME = True # Render a wireframe instead of the filled faces
+WIREFRAME = False # Render a wireframe instead of the filled faces
 INSERTION_SORT = False
 
 # The width and height of the window the game is displayed on
