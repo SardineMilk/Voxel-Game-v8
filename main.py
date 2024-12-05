@@ -46,13 +46,13 @@ class World:
     def __init__(self):
         self.chunks = []
 
-    def getVoxel(self, position:tuple[int, int, int]) -> int:
+    def getVoxel(self, position):
         chunk_position, local_position = self.__worldToLocal(position)
         chunk = self.__getChunk(chunk_position)
         voxel = chunk.getVoxel(local_position)
         return voxel
 
-    def setVoxel(self, position:tuple[int, int, int], type:int) -> None:
+    def setVoxel(self, position, type):
         chunk_position, local_position = self.__worldToLocal(position)
         chunk = self.__getChunk(chunk_position)
         chunk.setVoxel(local_position, type)
@@ -78,22 +78,25 @@ class World:
         # Unload uneeded chunkss
         for chunk in self.chunks:
             if chunk.position not in chunks_to_load:
+                # If chunk is not inside the player's render distance, we unload it
                 changed = True
                 self.chunks.remove(chunk)
         
         for chunk_position in chunks_to_load:
             if self.__getChunkIndex(list(chunk_position)) == None:
+                # If the chunk is not loaded, we load it
                 changed = True
                 self.__loadChunk(chunk_position)
 
         if changed:
-            self.mesh = self.constructMesh()
+            # If we've changed the loaded chunks, we remake the world
+            self.constructMesh()
 
     def constructMesh(self):
         mesh = []
         for chunk in self.chunks:
-            mesh += chunk.constructMesh()
-        return np.array(mesh, dtype=Face)
+            mesh += chunk.mesh
+        self.mesh = np.array(mesh, dtype=Face)
     
     def __getChunk(self, position:tuple[int, int, int]):
         # If the chunk doesn't exist, load it
@@ -106,7 +109,7 @@ class World:
 
         return self.chunks[chunk_index]
 
-    def __getChunkIndex(self, position:tuple[int, int, int]) -> int|None:
+    def __getChunkIndex(self, position):
         # From a chunk position, get the 
         # Index of the chunk in the array of loaded chunks
         for index, chunk in enumerate(self.chunks):
@@ -114,7 +117,7 @@ class World:
                 return index
         return None
 
-    def __worldToLocal(self, position: tuple[int, int, int]) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+    def __worldToLocal(self, position):
         # Convert a world position to a local position
         # Position of the chunk in 3d space
         chunk_index = [position[0] // CHUNK_SIZE, position[1] // CHUNK_SIZE, position[2] // CHUNK_SIZE]
@@ -135,6 +138,7 @@ class Chunk:
         # Types of the voxels contained in the chunk - A flattened 1d numpy array of integers
         # It is stored this way for efficieny 
         self.voxels = self.procGen()
+        self.constructMesh()
     
     def getVoxel(self, position):
         x, y, z = position
@@ -156,6 +160,7 @@ class Chunk:
             0 <= z <= CHUNK_SIZE - 1):
                 index = self.__ToFlat(position)
                 self.voxels[index] = type
+        self.constructMesh()
 
     def constructMesh(self):
         """
@@ -172,7 +177,7 @@ class Chunk:
 
         chunk_offset = pg.Vector3(self.position)*CHUNK_SIZE
 
-        mesh = []
+        self.mesh = []
         filtered_voxels = np.argwhere(self.voxels != 0)
         for voxel_index in filtered_voxels:
             voxel_pos = pg.Vector3(self.__To3d(voxel_index))
@@ -187,8 +192,7 @@ class Chunk:
 
                     voxel_type = self.getVoxel(voxel_pos)
 
-                    mesh.append(Face(voxel_world_pos, face_index, voxel_type))
-        return mesh
+                    self.mesh.append(Face(voxel_world_pos, face_index, voxel_type))
 
     def __ToFlat(self, position):
         """
@@ -282,8 +286,7 @@ class Renderer:
         
         world_voxel_position = face.position - camera.position
 
-        is_visible = c_functions.checkVisibility(Vector3D(world_voxel_position[0], world_voxel_position[1], world_voxel_position[2]),
-                                                 Vector3D(FACE_NORMALS[face.index].x, FACE_NORMALS[face.index].y, FACE_NORMALS[face.index].z))
+        is_visible = self.__checkVisibility(world_voxel_position, tuple(FACE_NORMALS[face.index]))
 
         if not is_visible:
             return None
@@ -305,7 +308,7 @@ class Renderer:
                 return None
 
             # This function will crash if given (*, * 0) as the vertex, but due to the Frustum Culling step, that will never happen
-            projected_vertex = c_functions.projectVertex(Vector3D(vertex[0], vertex[1], vertex[2]), Vector2D(CENTRE[0], CENTRE[1]))
+            projected_vertex = self.__projectVertex(vertex)
 
             processed_face[i] = (projected_vertex.x, projected_vertex.y)
 
@@ -330,6 +333,14 @@ class Renderer:
         points, color = face
         pg.draw.polygon(self.surface, color, points, width=WIREFRAME)
 
+    def __projectVertex(self, vertex):
+        # Call the function projectVertex, written in C to improve performance.
+        return c_functions.projectVertex(Vector3D(vertex[0], vertex[1], vertex[2]), Vector2D(CENTRE[0], CENTRE[1]))
+
+    def __checkVisibility(self, position, normal):
+        return c_functions.checkVisibility(Vector3D(position[0], position[1], position[2]),
+                                                 Vector3D(normal[0], normal[1], normal[2]))
+
 
 class Face:
     def __init__(self, position, index, type):
@@ -344,7 +355,7 @@ screen = pg.display.set_mode((WIDTH, HEIGHT), flags=pg.DOUBLEBUF)
 clock = pg.time.Clock()
 previous_time = 0
 
-camera = Camera((0, -10, 0), (0, 0, 0))
+camera = Camera((0, -2, 0), (0, 0, 0))
 world = World()
 renderer = Renderer(screen)
 
@@ -375,6 +386,7 @@ while running:
         running = False
 
     camera.move(keys, 1/delta)
+    camera.position.z += 10
 
     world.updateRenderedChunks(camera.position)
 
@@ -382,7 +394,7 @@ while running:
     screen.fill((32, 32, 32))
     renderer.render(world.mesh)
 
-    print(fps)
+    print(fps, camera.position.z)
 
     pg.display.flip()
     clock.tick(MAX_FPS)

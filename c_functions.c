@@ -28,15 +28,12 @@ bool checkVisibility(Vector3D voxel, Vector3D normal) {
         // 3blue1brown has a wonderful linear algebra video explaining this: https://www.youtube.com/watch?v=LyGKycYT2v0 
 
         float face_to_camera = 
-        voxel.x * normal.x +
-        voxel.y * normal.y +
-        voxel.z * normal.z;
+                voxel.x * normal.x +
+                voxel.y * normal.y +
+                voxel.z * normal.z;
 
         // Theres a slight tolerance to prevent faces popping out of view too early
-        bool is_visible = face_to_camera <= -0.5;
+        bool is_visible = (voxel.x * normal.x + voxel.y * normal.y + voxel.z * normal.z) <= -0.5;
 
         return is_visible;
 }
-
-
-void main() {}
