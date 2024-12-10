@@ -18,7 +18,8 @@
         {
             "name": "gcc",
             "includePath": [
-                "${workspaceFolder}/**"
+                "C:/msys64/ucrt64/include/python3.11",
+                "C:/msys64/ucrt64/include/**"
             ],
             "defines": [
                 "_DEBUG",

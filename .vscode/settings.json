@@ -1,5 +1,6 @@
 {
     "files.associations": {
         "stdbool.h": "c"
-    }
+    },
+    "workbench.sideBar.location": "right"
 }

@@ -30,7 +30,7 @@ c_functions.checkVisibility.restype = ctypes.c_bool
 
 # Debug tools
 GRAB_MOUSE = True  # Hide the mouse and lock it to the centre of the window
-PROFILE = True # Activate the profiler
+PROFILE = False # Activate the profiler
 WIREFRAME = False # Render a wireframe instead of the filled faces
 INSERTION_SORT = False
 
@@ -63,7 +63,7 @@ NOISE = PerlinNoise(octaves=OCTAVES, seed=SEED)
 PLAYER_SPEED = 5  # Voxels per second
 PLAYER_ROTATION_SENSITIVITY = 15
 VERTICAL_FOV = 1  # (Radians)
-RENDER_DISTANCE = 3
+RENDER_DISTANCE = 4
 
 # Clipping plane(s)
 NEAR = 0.1
