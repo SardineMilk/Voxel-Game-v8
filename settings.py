@@ -31,11 +31,10 @@ c_functions.checkVisibility.restype = ctypes.c_bool
 # Debug tools
 GRAB_MOUSE = True  # Hide the mouse and lock it to the centre of the window
 PROFILE = False # Activate the profiler
-WIREFRAME = False # Render a wireframe instead of the filled faces
+WIREFRAME = True # Render a wireframe instead of the filled faces
 INSERTION_SORT = False
 
 # The width and height of the window the game is displayed on
-WIDTH, HEIGHT = 1920, 1080
 WIDTH, HEIGHT =  1000, 1000
 CENTRE = (WIDTH//2, HEIGHT//2)
 ASPECT_RATIO = WIDTH / HEIGHT

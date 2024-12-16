@@ -45,6 +45,7 @@ class Camera:
 class World:
     def __init__(self):
         self.chunks = []
+        self.changed = True  # If any chunk meshes have changed, we set this to tre
 
     def getVoxel(self, position):
         chunk_position, local_position = self.__worldToLocal(position)
@@ -57,8 +58,12 @@ class World:
         chunk = self.__getChunk(chunk_position)
         chunk.setVoxel(local_position, type)
 
+    def update(self, camera):
+        self.updateRenderedChunks(camera.position)
+        if self.changed:
+            self.constructMesh()
+
     def updateRenderedChunks(self, player_pos):
-        changed = False
         chunks_to_load = []
         # Builds a list of chunks that need to be loaded
         for i in range(RENDER_DISTANCE ** 3):
@@ -79,18 +84,14 @@ class World:
         for chunk in self.chunks:
             if chunk.position not in chunks_to_load:
                 # If chunk is not inside the player's render distance, we unload it
-                changed = True
+                self.changed = True
                 self.chunks.remove(chunk)
         
         for chunk_position in chunks_to_load:
             if self.__getChunkIndex(list(chunk_position)) == None:
                 # If the chunk is not loaded, we load it
-                changed = True
+                self.changed = True
                 self.__loadChunk(chunk_position)
-
-        if changed:
-            # If we've changed the loaded chunks, we remake the world
-            self.constructMesh()
 
     def constructMesh(self):
         mesh = []
@@ -137,10 +138,13 @@ class Chunk:
         self.position = tuple(position)
         # Types of the voxels contained in the chunk - A flattened 1d numpy array of integers
         # It is stored this way for efficieny 
-        self.voxels = self.procGen()
+        self.voxels = self.__getChunkData()
         self.constructMesh()
     
     def getVoxel(self, position):
+        """
+        Fetch the voxel data at an (x, y, z) position in the chunk
+        """
         x, y, z = position
         # Range check - If it's outside the chunk, we return 0
         if ((0 <= x < CHUNK_SIZE) and
@@ -153,6 +157,11 @@ class Chunk:
         return 0   
     
     def setVoxel(self, position, type):
+        """
+        Set the voxel data at an (x, y, z) position in the chunk
+        Then rebuild the chunk mesh
+        """
+
         x, y, z = position
         # Range check - Is it inside the chunk?
         if (0 <= x <= CHUNK_SIZE - 1 or 
@@ -165,11 +174,10 @@ class Chunk:
     def constructMesh(self):
         """
         This constructs the chunk mesh
-        It takes the form of a list, with each element being:
-        tuple(voxel_world_pos, voxel_type, face_index)
+        It takes the form of a list, with each element being a Face object
 
         The face_index determines which side of the voxel the face belongs to, with the lookup table stored in settings.py
-        TODO move from settings.py
+        TODO move from settings.py (voxel.py?)
 
         The voxel_type is technically uneeded, as world.getVoxel(voxel_world_pos) can be called to get the type
         However, it gives a massive performance boost
@@ -181,13 +189,13 @@ class Chunk:
         filtered_voxels = np.argwhere(self.voxels != 0)
         for voxel_index in filtered_voxels:
             voxel_pos = pg.Vector3(self.__To3d(voxel_index))
+
             for face_index, face_normal in enumerate(FACE_NORMALS):
                 # Interior Face Culling
                 check_pos = voxel_pos + face_normal
-
                 neighbour_type = self.getVoxel(check_pos)
-
                 if neighbour_type == 0:
+
                     voxel_world_pos = tuple((chunk_offset + pg.Vector3(voxel_pos)))
 
                     voxel_type = self.getVoxel(voxel_pos)
@@ -208,7 +216,8 @@ class Chunk:
         """
 
         # Convert a 1d index to a 3d position
-        index = int(index[0])  # index[0] because index is a numpy array, so it shouldnt be directly converted
+        index = int(index[0])  # index[0] because index is a numpy array, so it shouldnt be directly used
+
         z = int(index / CHUNK_AREA)
         index -= z * CHUNK_AREA
 
@@ -218,17 +227,32 @@ class Chunk:
 
         return (x, y, z)   
 
-    def procGen(self):
+    def __getChunkData(self):
+        """
+        Get the voxel data for this chunk
+        Either from the file or the terrain generator
+        """
+        already_generated = False
+        if already_generated:
+            # Load From File
+            pass
+        else:
+            return self.__generateTerrain()
+
+    def __generateTerrain(self):
+        """
+        Procedurally generate the chunk terrain
+        """
+
         voxels = np.zeros(CHUNK_VOLUME, dtype=int)
         for i in range(CHUNK_SIZE):
             for j in range(CHUNK_SIZE):
                 if self.position[1] == 0:
-                    index = self.__ToFlat((i, 0, j))
-                    voxel_type =(math.sin(i*(0.1+self.position[0]))+math.sin(j*(0.1+self.position[2])))%4 +1
-                    voxel_type = (
-                                    math.sqrt(((i+self.position[0]*CHUNK_SIZE)**2)+
-                                            ((j+self.position[2]*CHUNK_SIZE)**2))//2
+                    voxel_type = (math.sqrt(((i+self.position[0]*CHUNK_SIZE)**2)%80+
+                                            ((j+self.position[2]*CHUNK_SIZE)**2)%80)//2
                                 ) %3+1
+                    index = self.__ToFlat((i, 0, j))
+
                     voxels[index] = voxel_type
         return voxels
 
@@ -258,48 +282,59 @@ class Renderer:
         self.drawMesh = np.vectorize(self.__drawFace)
     
     def render(self, mesh):
+        """
+        Process the mesh, then draw it on the screen
+        """
+
         if len(mesh) == 0:
             return
         
         if INSERTION_SORT:
             sorted_mesh = self.__sortMesh(mesh)
         else:
+            # Length_squared() is faster than length()
+            # Only the relative distances matter, so it can be used
             sorted_mesh = mesh[np.argsort([-(face.position-camera.position).length_squared() for face in mesh])]
-        # Process the voxels
         
+        # Using the mesh, return a list of faces that must be drawn
         processed_mesh = self.processMesh(sorted_mesh)
         # Filter out None type - Faces that were culled in the processMesh function
         processed_mesh = processed_mesh[processed_mesh != None]
-        #processed_mesh = list(map(self.__processFace, sorted_mesh))  # List of quads and colours that must be drawn
-        #processed_mesh = filter(None, processed_mesh)
 
+        # Don't draw an empty mesh
         if len(processed_mesh) == 0:
             return
 
         self.drawMesh(processed_mesh)
-        
+    
     def __processFace(self, face):
-        #TODO move into Face class
         """
         - Translate face
         If face is visible:
         - Rotate
         - Project
         """
-        
-        world_voxel_position = face.position - camera.position
+    
+        relative_voxel_position = face.position - camera.position  # Relative to the camera - (0, 0, 0) is the camera position
 
-        is_visible = self.__checkVisibility(world_voxel_position, tuple(FACE_NORMALS[face.index]))
+        # This performs backface culling
+        is_visible = self.__checkVisibility(relative_voxel_position, tuple(FACE_NORMALS[face.index]))
 
+        # If it's culled, skip the rest of the function
         if not is_visible:
             return None
         
+        # processed_face will always have length 4, so .append() is not needed
         processed_face = [0]*4
+        # Get the vertex_indices of each vertex of the face. These will be used to get the vertices from the VERTICES array
         face_vertex_indices = FACES[face.index]
+
         for i, vertex_index in enumerate(face_vertex_indices):
             model_vertex_position = VERTICES[vertex_index]  # Indexes into the VERTICES array
-            vertex = world_voxel_position + model_vertex_position
-            # TODO Scale to face size
+            
+            vertex = relative_voxel_position + model_vertex_position
+
+            # TODO Scale to face size - greedy meshing
 
             # Rotate Pitch - Y
             vertex = vertex.rotate(-camera.rotation.x, pg.Vector3(0, 1, 0))
@@ -307,10 +342,10 @@ class Renderer:
             vertex = vertex.rotate(camera.rotation.y, pg.Vector3(1, 0, 0))
 
             # Frustum Culling - Don't render if behind camera or too far away
-            if vertex.z <= NEAR:
+            if vertex.z < NEAR:
                 return None
 
-            # This function will crash if given (*, * 0) as the vertex, but due to the Frustum Culling step, that will never happen
+            # This function will crash if given (*, *, 0) as the vertex, but due to the Frustum Culling step, that will never happen
             projected_vertex = self.__projectVertex(vertex)
 
             processed_face[i] = (projected_vertex.x, projected_vertex.y)
@@ -341,6 +376,7 @@ class Renderer:
         return c_functions.projectVertex(Vector3D(vertex[0], vertex[1], vertex[2]), Vector2D(CENTRE[0], CENTRE[1]))
 
     def __checkVisibility(self, position, normal):
+        # Call the function checkVisibility, written in C to improve performance.
         return c_functions.checkVisibility(Vector3D(position[0], position[1], position[2]),
                                                 Vector3D(normal[0], normal[1], normal[2]))
 
@@ -355,6 +391,7 @@ class Face:
 pg.init()
 
 screen = pg.display.set_mode((WIDTH, HEIGHT), flags=pg.DOUBLEBUF)
+
 clock = pg.time.Clock()
 previous_time = 0
 
@@ -374,10 +411,10 @@ while running:
     current_time = pg.time.get_ticks()
     delta = clamp(current_time - previous_time, 1, 9999)
     previous_time = current_time
-    fps = round(1000/delta, 2)
+    fps = round(clock.get_fps(), 2)
 
     # Player logic
-    for event in pg.event.get():  # Movement breaks without this for some reason
+    for event in pg.event.get():  
         if event.type == pg.MOUSEMOTION:
             relative_mouse_movement = event.rel
             camera.rotate(relative_mouse_movement, delta)
@@ -388,13 +425,13 @@ while running:
 
     camera.move(keys, 1/delta)
 
-    world.updateRenderedChunks(camera.position)
+    world.update(camera)
 
     # Render
     screen.fill((32, 32, 32))
     renderer.render(world.mesh)
 
-    print(fps)
+    pg.display.set_caption(f"Fps: {fps}")
 
     pg.display.flip()
     clock.tick(MAX_FPS)
