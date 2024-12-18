@@ -5,33 +5,10 @@ from perlin_noise import PerlinNoise
 from numba import njit
 from random import randint
 
-# Import functions from c_functions
-import ctypes
-
-class Vector2D(ctypes.Structure):
-    _fields_ = [("x", ctypes.c_int),
-                ("y", ctypes.c_int)]
-    
-class Vector3D(ctypes.Structure):
-    _fields_ = [("x", ctypes.c_float),
-                ("y", ctypes.c_float),
-                ("z", ctypes.c_float)]
-    
-c_functions = ctypes.CDLL("./c_functions.dll")
-
-# Project Vertex
-c_functions.projectVertex.argtypes = (Vector3D, Vector2D)
-c_functions.projectVertex.restype = Vector2D
-
-# Check Visibility
-c_functions.checkVisibility.argtypes = (Vector3D, Vector3D)
-c_functions.checkVisibility.restype = ctypes.c_bool
-
-
 # Debug tools
 GRAB_MOUSE = True  # Hide the mouse and lock it to the centre of the window
-PROFILE = False # Activate the profiler
-WIREFRAME = True # Render a wireframe instead of the filled faces
+PROFILE = True # Activate the profiler
+WIREFRAME = False # Render a wireframe instead of the filled faces
 INSERTION_SORT = False
 
 # The width and height of the window the game is displayed on
@@ -74,14 +51,14 @@ def clamp(n, minn, maxn):
 
 
 VERTICES = [
-    pg.Vector3((-0.5, -0.5, -0.5)),
-    pg.Vector3((0.5, -0.5, -0.5)),
-    pg.Vector3((0.5, 0.5, -0.5)),
-    pg.Vector3((-0.5, 0.5, -0.5)),
-    pg.Vector3((-0.5, -0.5, 0.5)),
-    pg.Vector3((0.5, -0.5, 0.5)),
-    pg.Vector3((0.5, 0.5, 0.5)),
-    pg.Vector3((-0.5, 0.5, 0.5)),
+    (-0.5, -0.5, -0.5),
+    (0.5, -0.5, -0.5),
+    (0.5, 0.5, -0.5),
+    (-0.5, 0.5, -0.5),
+    (-0.5, -0.5, 0.5),
+    (0.5, -0.5, 0.5),
+    (0.5, 0.5, 0.5),
+    (-0.5, 0.5, 0.5),
 ]
 
 FACES = [
@@ -94,12 +71,12 @@ FACES = [
 ]
 
 FACE_NORMALS = [
-    pg.Vector3((0, 0, -1)),
-    pg.Vector3((0, 0, 1)),
-    pg.Vector3((-1, 0, 0)),
-    pg.Vector3((1, 0, 0)),
-    pg.Vector3((0, -1, 0)),
-    pg.Vector3((0, 1, 0)),
+    (0, 0, -1),
+    (0, 0, 1),
+    (-1, 0, 0),
+    (1, 0, 0),
+    (0, -1, 0),
+    (0, 1, 0),
 ]
 
 voxel_types = [

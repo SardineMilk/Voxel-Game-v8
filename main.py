@@ -311,19 +311,19 @@ class Renderer:
         """
         - Translate face
         If face is visible:
-        - Rotate
-        - Project
+            - Rotate
+            - Project
+            - Return processed_face
         """
-    
-        relative_voxel_position = face.position - camera.position  # Relative to the camera - (0, 0, 0) is the camera position
+
+        relative_voxel_position = face.toCameraSpace(camera.position)  # Relative to the camera - (0, 0, 0) is the camera position
 
         # This performs backface culling
-        is_visible = self.__checkVisibility(relative_voxel_position, tuple(FACE_NORMALS[face.index]))
-
+        is_visible = self.__checkVisibility(relative_voxel_position, FACE_NORMALS[face.index])
         # If it's culled, skip the rest of the function
         if not is_visible:
             return None
-        
+
         # processed_face will always have length 4, so .append() is not needed
         processed_face = [0]*4
         # Get the vertex_indices of each vertex of the face. These will be used to get the vertices from the VERTICES array
@@ -332,25 +332,23 @@ class Renderer:
         for i, vertex_index in enumerate(face_vertex_indices):
             model_vertex_position = VERTICES[vertex_index]  # Indexes into the VERTICES array
             
-            vertex = relative_voxel_position + model_vertex_position
+            vertex = pg.Vector3(relative_voxel_position) + model_vertex_position
 
             # TODO Scale to face size - greedy meshing
 
-            # Rotate Pitch - Y
+            # Rotate Yaw - Around Y Axis
             vertex = vertex.rotate(-camera.rotation.x, pg.Vector3(0, 1, 0))
-            # Rotate Yaw - X
+            # Rotate Pitch - Around X Axis
             vertex = vertex.rotate(camera.rotation.y, pg.Vector3(1, 0, 0))
 
             # Frustum Culling - Don't render if behind camera or too far away
             if vertex.z < NEAR:
                 return None
 
-            # This function will crash if given (*, *, 0) as the vertex, but due to the Frustum Culling step, that will never happen
-            projected_vertex = self.__projectVertex(vertex)
+            projected_vertex = self.projectVertex(vertex)
+            processed_face[i] = projected_vertex
 
-            processed_face[i] = (projected_vertex.x, projected_vertex.y)
-
-        return (tuple(processed_face), face.colour)
+        return (processed_face, face.colour)
 
     def __sortMesh(self, mesh):
         """
@@ -371,14 +369,21 @@ class Renderer:
         points, color = face
         pg.draw.polygon(self.surface, color, points, width=WIREFRAME)
 
-    def __projectVertex(self, vertex):
-        # Call the function projectVertex, written in C to improve performance.
-        return c_functions.projectVertex(Vector3D(vertex[0], vertex[1], vertex[2]), Vector2D(CENTRE[0], CENTRE[1]))
+    # Using @staticmethod gives a large performance increase
+    @staticmethod
+    def projectVertex(vertex):
+        # This function will crash if given (*, *, 0) as the vertex, but due to the Frustum Culling step, that will never happen
+        x = ((vertex[0] / vertex[2]) + 1) * CENTRE[0]
+        y = ((vertex[1] / vertex[2]) + 1) * CENTRE[1]
+        return (x, y)
 
-    def __checkVisibility(self, position, normal):
-        # Call the function checkVisibility, written in C to improve performance.
-        return c_functions.checkVisibility(Vector3D(position[0], position[1], position[2]),
-                                                Vector3D(normal[0], normal[1], normal[2]))
+    @staticmethod
+    def __checkVisibility(position, normal):
+        return (
+            position[0] * normal[0] +
+            position[1] * normal[1] +
+            position[2] * normal[2] 
+        ) <= -0.5
 
 
 class Face:
@@ -386,6 +391,14 @@ class Face:
         self.position = position  # (x,y,z) of the origin of the face
         self.index = index  # Index of the face - Indexes into FACE_NORMALS
         self.colour = voxel_types[type - 1]
+    
+    def toCameraSpace(self, camera_position):
+        # Translates the face from world space, with (0, 0, 0) at the origin,
+        # to camera space, with (0, 0, 0) at the camera's position
+        return (
+            self.position[0] - camera_position[0],
+            self.position[1] - camera_position[1],
+            self.position[2] - camera_position[2])
 
 
 pg.init()
@@ -430,7 +443,6 @@ while running:
     # Render
     screen.fill((32, 32, 32))
     renderer.render(world.mesh)
-
     pg.display.set_caption(f"Fps: {fps}")
 
     pg.display.flip()
