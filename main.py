@@ -276,8 +276,6 @@ class Renderer:
         # The surface the renderer will draw on
         self.surface = surface
 
-        # We vectorise the processFace function using Numpy for performance reasons
-        self.processMesh = np.vectorize(self.__processFace, otypes=[Face])
         # Vectorise the drawFace function
         self.drawMesh = np.vectorize(self.__drawFace)
     
@@ -285,29 +283,41 @@ class Renderer:
         """
         Process the mesh, then draw it on the screen
         """
-
         if len(mesh) == 0:
             return
         
-        if INSERTION_SORT:
-            sorted_mesh = self.__sortMesh(mesh)
-        else:
-            # Length_squared() is faster than length()
-            # Only the relative distances matter, so it can be used
-            sorted_mesh = mesh[np.argsort([-(face.position-camera.position).length_squared() for face in mesh])]
-        
+        processed_mesh = self.processMesh(mesh, tuple(camera.position), tuple(camera.rotation))
+
+        if len(processed_mesh) != 0:
+            sorted_mesh = sorted(processed_mesh, key=lambda x: x[2])[::-1]
+
+            for face in sorted_mesh:
+                pg.draw.polygon(self.surface, face[1], face[0], width=WIREFRAME)
+
+    @staticmethod
+    def processMesh(mesh, camera_position, camera_rotation):
         # Using the mesh, return a list of faces that must be drawn
-        processed_mesh = self.processMesh(sorted_mesh)
-        # Filter out None type - Faces that were culled in the processMesh function
-        processed_mesh = processed_mesh[processed_mesh != None]
-
-        # Don't draw an empty mesh
-        if len(processed_mesh) == 0:
-            return
-
-        self.drawMesh(processed_mesh)
+        processed_mesh = []  # (Points, Colour, Depth)
+        sin_yaw =   math.sin(math.radians(-camera_rotation[0]))
+        cos_yaw =   math.cos(math.radians(-camera_rotation[0]))
+        sin_pitch = math.sin(math.radians(camera_rotation[1]))
+        cos_pitch = math.cos(math.radians(camera_rotation[1]))
+        
+        for face in mesh:
+            processed_face = processFace(face.position, face.index, sin_yaw, cos_yaw, sin_pitch, cos_pitch, camera_position)
+            if processed_face != None:
+                if processed_face[0] != None:
+                    points, depth = processed_face
+                    processed_mesh.append((points, face.colour, depth))
+        return processed_mesh
     
-    def __processFace(self, face):
+    def __drawFace(self, face):
+        points, color = face
+        pg.draw.polygon(self.surface, color, points, width=WIREFRAME)
+
+
+@njit
+def processFace(voxel_position, face_index, sin_yaw, cos_yaw, sin_pitch, cos_pitch, camera_position):
         """
         - Translate face
         If face is visible:
@@ -315,75 +325,83 @@ class Renderer:
             - Project
             - Return processed_face
         """
+        VERTICES = [
+            (-0.5, -0.5, -0.5),
+            (0.5, -0.5, -0.5),
+            (0.5, 0.5, -0.5),
+            (-0.5, 0.5, -0.5),
+            (-0.5, -0.5, 0.5),
+            (0.5, -0.5, 0.5),
+            (0.5, 0.5, 0.5),
+            (-0.5, 0.5, 0.5),
+        ]
 
-        relative_voxel_position = face.toCameraSpace(camera.position)  # Relative to the camera - (0, 0, 0) is the camera position
+        FACES = [
+            (0, 1, 2, 3),  # Front face
+            (4, 5, 6, 7),  # Back face
+            (4, 0, 3, 7),  # Left face
+            (1, 5, 6, 2),  # Right face
+            (4, 5, 1, 0),  # Top face
+            (3, 2, 6, 7),  # Bottom face
+        ]
+
+        FACE_NORMALS = [
+            (0, 0, -1),
+            (0, 0, 1),
+            (-1, 0, 0),
+            (1, 0, 0),
+            (0, -1, 0),
+            (0, 1, 0),
+        ]
+        relative_voxel_position = (
+                                    voxel_position[0] - camera_position[0],
+                                    voxel_position[1] - camera_position[1],
+                                    voxel_position[2] - camera_position[2]
+                                )  # Relative to the camera - (0, 0, 0) is the camera position
 
         # This performs backface culling
-        is_visible = self.__checkVisibility(relative_voxel_position, FACE_NORMALS[face.index])
+        normal = FACE_NORMALS[face_index]
+        face_to_camera = (
+                            relative_voxel_position[0] * normal[0] +
+                            relative_voxel_position[1] * normal[1] +
+                            relative_voxel_position[2] * normal[2] 
+                        )
+        is_visible =  (face_to_camera <= -0.5)
+        
         # If it's culled, skip the rest of the function
         if not is_visible:
             return None
 
         # processed_face will always have length 4, so .append() is not needed
-        processed_face = [0]*4
-        # Get the vertex_indices of each vertex of the face. These will be used to get the vertices from the VERTICES array
-        face_vertex_indices = FACES[face.index]
+        processed_face = []
 
-        for i, vertex_index in enumerate(face_vertex_indices):
+        for i, vertex_index in enumerate(FACES[face_index]):
             model_vertex_position = VERTICES[vertex_index]  # Indexes into the VERTICES array
             
-            vertex = pg.Vector3(relative_voxel_position) + model_vertex_position
+            vertex = (
+                        relative_voxel_position[0] + model_vertex_position[0],
+                        relative_voxel_position[1] + model_vertex_position[1],
+                        relative_voxel_position[2] + model_vertex_position[2]
+                    ) 
 
-            # TODO Scale to face size - greedy meshing
+            x, y, z = vertex
+            x, z = x * cos_yaw + z * sin_yaw, -x * sin_yaw + z * cos_yaw
+            y, z = y * cos_pitch - z * sin_pitch, y * sin_pitch + z * cos_pitch
+            vertex = x, y, z
 
-            # Rotate Yaw - Around Y Axis
-            vertex = vertex.rotate(-camera.rotation.x, pg.Vector3(0, 1, 0))
-            # Rotate Pitch - Around X Axis
-            vertex = vertex.rotate(camera.rotation.y, pg.Vector3(1, 0, 0))
 
             # Frustum Culling - Don't render if behind camera or too far away
-            if vertex.z < NEAR:
+            if vertex[2] < 0.1:
                 return None
 
-            projected_vertex = self.projectVertex(vertex)
-            processed_face[i] = projected_vertex
+            projected_x = ((vertex[0] / vertex[2]) + 1) * CENTRE[0]
+            projected_y = ((vertex[1] / vertex[2]) + 1) * CENTRE[1]
 
-        return (processed_face, face.colour)
+            processed_face.append((int(projected_x), int(projected_y)))
 
-    def __sortMesh(self, mesh):
-        """
-        Custom Insertion Sort algorithm that runs if the setting INSERTION_SORT is set to True
-        """
-        # Traverse the mesh starting from the second face
-        for i in range(1, len(mesh)):
-            current_face = mesh[i]
-            j = i-1
-            # If the distance to the comparison face is less than current_face, swap them
-            while j >=0 and ((current_face.position-camera.position).length_squared() >= (mesh[j].position-camera.position).length_squared()):
-                mesh[j+1] = mesh[j]
-                j -= 1
-            mesh[j+1] = current_face
-        return np.array(mesh)
+        depth = (relative_voxel_position[0]**2 + relative_voxel_position[1]**2 + relative_voxel_position[2]**2)
 
-    def __drawFace(self, face):
-        points, color = face
-        pg.draw.polygon(self.surface, color, points, width=WIREFRAME)
-
-    # Using @staticmethod gives a large performance increase
-    @staticmethod
-    def projectVertex(vertex):
-        # This function will crash if given (*, *, 0) as the vertex, but due to the Frustum Culling step, that will never happen
-        x = ((vertex[0] / vertex[2]) + 1) * CENTRE[0]
-        y = ((vertex[1] / vertex[2]) + 1) * CENTRE[1]
-        return (x, y)
-
-    @staticmethod
-    def __checkVisibility(position, normal):
-        return (
-            position[0] * normal[0] +
-            position[1] * normal[1] +
-            position[2] * normal[2] 
-        ) <= -0.5
+        return processed_face, depth
 
 
 class Face:
