@@ -286,36 +286,38 @@ class Renderer:
         if len(mesh) == 0:
             return
         
-        processed_mesh = self.processMesh(mesh, tuple(camera.position), tuple(camera.rotation))
+        processed_mesh = processMesh(mesh, tuple(camera.position), tuple(camera.rotation))
 
-        if len(processed_mesh) != 0:
-            sorted_mesh = sorted(processed_mesh, key=lambda x: x[2])[::-1]
+        if len(processed_mesh) == 0:
+            return
+            
+        sorted_mesh = sorted(processed_mesh, key=lambda x: x[2])[::-1]
 
-            for face in sorted_mesh:
-                pg.draw.polygon(self.surface, face[1], face[0], width=WIREFRAME)
+        for face in sorted_mesh:
+            pg.draw.polygon(self.surface, face[1], face[0], width=WIREFRAME)
 
-    @staticmethod
-    def processMesh(mesh, camera_position, camera_rotation):
-        # Using the mesh, return a list of faces that must be drawn
-        processed_mesh = []  # (Points, Colour, Depth)
-        sin_yaw =   math.sin(math.radians(-camera_rotation[0]))
-        cos_yaw =   math.cos(math.radians(-camera_rotation[0]))
-        sin_pitch = math.sin(math.radians(camera_rotation[1]))
-        cos_pitch = math.cos(math.radians(camera_rotation[1]))
-        
-        for face in mesh:
-            processed_face = processFace(face.position, face.index, sin_yaw, cos_yaw, sin_pitch, cos_pitch, camera_position)
-            if processed_face != None:
-                if processed_face[0] != None:
-                    points, depth = processed_face
-                    processed_mesh.append((points, face.colour, depth))
-        return processed_mesh
-    
     def __drawFace(self, face):
         points, color = face
         pg.draw.polygon(self.surface, color, points, width=WIREFRAME)
 
 
+def processMesh(mesh, camera_position, camera_rotation):
+    # Using the mesh, return a list of faces that must be drawn
+    processed_mesh = []  # (Points, Colour, Depth)
+    sin_yaw =   math.sin(math.radians(-camera_rotation[0]))
+    cos_yaw =   math.cos(math.radians(-camera_rotation[0]))
+    sin_pitch = math.sin(math.radians(camera_rotation[1]))
+    cos_pitch = math.cos(math.radians(camera_rotation[1]))
+    
+    for face in mesh:
+        processed_face = processFace(face.position, face.index, sin_yaw, cos_yaw, sin_pitch, cos_pitch, camera_position)
+        if processed_face != None:
+            if processed_face[0] != None:
+                points, depth = processed_face
+                processed_mesh.append((points, face.colour, depth))
+    return processed_mesh
+
+    
 @njit
 def processFace(voxel_position, face_index, sin_yaw, cos_yaw, sin_pitch, cos_pitch, camera_position):
         """
@@ -325,6 +327,7 @@ def processFace(voxel_position, face_index, sin_yaw, cos_yaw, sin_pitch, cos_pit
             - Project
             - Return processed_face
         """
+        #TODO pass these as parameters
         VERTICES = [
             (-0.5, -0.5, -0.5),
             (0.5, -0.5, -0.5),
@@ -375,6 +378,8 @@ def processFace(voxel_position, face_index, sin_yaw, cos_yaw, sin_pitch, cos_pit
         # processed_face will always have length 4, so .append() is not needed
         processed_face = []
 
+        inside = False
+
         for i, vertex_index in enumerate(FACES[face_index]):
             model_vertex_position = VERTICES[vertex_index]  # Indexes into the VERTICES array
             
@@ -390,14 +395,19 @@ def processFace(voxel_position, face_index, sin_yaw, cos_yaw, sin_pitch, cos_pit
             vertex = x, y, z
 
 
-            # Frustum Culling - Don't render if behind camera or too far away
-            if vertex[2] < 0.1:
-                return None
-
             projected_x = ((vertex[0] / vertex[2]) + 1) * CENTRE[0]
             projected_y = ((vertex[1] / vertex[2]) + 1) * CENTRE[1]
 
+            # Frustum Culling - Don't render if not in view frustum
+            if vertex[2] < 0.1:
+                return None
+            if 0 <= projected_x <= WIDTH or 0 <= projected_y <= HEIGHT:
+                inside = True
+
             processed_face.append((int(projected_x), int(projected_y)))
+
+        if not inside:
+            return None
 
         depth = (relative_voxel_position[0]**2 + relative_voxel_position[1]**2 + relative_voxel_position[2]**2)
 

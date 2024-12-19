@@ -7,7 +7,7 @@ from random import randint
 
 # Debug tools
 GRAB_MOUSE = True  # Hide the mouse and lock it to the centre of the window
-PROFILE = True # Activate the profiler
+PROFILE = False # Activate the profiler
 WIREFRAME = False # Render a wireframe instead of the filled faces
 INSERTION_SORT = False
 
