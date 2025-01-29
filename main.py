@@ -1,9 +1,5 @@
 from settings import *
 
-if PROFILE:
-    import profiler
-    profiler.profiler(sortby="tottime").start(True)
-
 
 class Camera:
     def __init__(self, starting_position: pg.Vector3, starting_rotation: pg.Vector3):
@@ -43,7 +39,8 @@ class Camera:
     
 
 class World:
-    def __init__(self):
+    def __init__(self, name):
+        self.name = name
         self.chunks = []
         self.changed = True  # If any chunk meshes have changed, we set this to tre
 
@@ -57,11 +54,13 @@ class World:
         chunk_position, local_position = self.__worldToLocal(position)
         chunk = self.__getChunk(chunk_position)
         chunk.setVoxel(local_position, type)
+        self.changed = True
 
     def update(self, camera):
         self.updateRenderedChunks(camera.position)
         if self.changed:
             self.constructMesh()
+        self.changed = False
 
     def updateRenderedChunks(self, player_pos):
         chunks_to_load = []
@@ -85,13 +84,13 @@ class World:
             if chunk.position not in chunks_to_load:
                 # If chunk is not inside the player's render distance, we unload it
                 self.changed = True
-                self.chunks.remove(chunk)
-        
+                self.unloadChunk(chunk.position)
+
         for chunk_position in chunks_to_load:
             if self.__getChunkIndex(list(chunk_position)) == None:
                 # If the chunk is not loaded, we load it
                 self.changed = True
-                self.__loadChunk(chunk_position)
+                self.loadChunk(chunk_position)
 
     def constructMesh(self):
         mesh = []
@@ -103,7 +102,7 @@ class World:
         # If the chunk doesn't exist, load it
         chunk_index = self.__getChunkIndex(position)
         if chunk_index == None:
-            self.__loadChunk(position)
+            self.loadChunk(position)
             # loadChunk appends the chunk to the end of self.chunks
             # So it will be the last item in the list
             return self.chunks[-1]
@@ -127,18 +126,32 @@ class World:
 
         return tuple(chunk_index), tuple(local_index)
 
-    def __loadChunk(self, position):
-        # TODO - file opening
-        self.chunks.append(Chunk(position))
+    def loadChunk(self, position):
+        try:
+            # Load chunk data from file
+            file_name = self.name +"/"+ str(tuple(position))+".npy"
+            voxels = np.load(file_name)
+        except OSError:
+            voxels = generateTerrain(position)
 
+        self.chunks.append(Chunk(position, voxels))
+
+    def unloadChunk(self, position):
+        # Unload a chunk, saving it to file
+        chunk = self.__getChunk(position)
+
+        file_name = self.name +"/"+ str(chunk.position)
+        np.save(file_name, chunk.voxels)
+
+        self.chunks.remove(chunk)
 
 class Chunk:
-    def __init__(self, position):
+    def __init__(self, position, voxels):
         # Index of the chunk in 3d space - Tuple
         self.position = tuple(position)
         # Types of the voxels contained in the chunk - A flattened 1d numpy array of integers
-        # It is stored this way for efficieny 
-        self.voxels = self.__getChunkData()
+        # It is stored this way for efficiency - both time and space 
+        self.voxels = voxels
         self.constructMesh()
     
     def getVoxel(self, position):
@@ -151,10 +164,10 @@ class Chunk:
             (0 <= y < CHUNK_SIZE) and
             (0 <= z < CHUNK_SIZE)):
 
-            index = self.__ToFlat(position)
+            index = toFlat(position)
             return self.voxels[index]
 
-        return 0   
+        return 0  # If position is outside chunk, assume it's empty to prevent holes in the terrain
     
     def setVoxel(self, position, type):
         """
@@ -167,7 +180,7 @@ class Chunk:
         if (0 <= x <= CHUNK_SIZE - 1 or 
             0 <= y <= CHUNK_SIZE - 1 or
             0 <= z <= CHUNK_SIZE - 1):
-                index = self.__ToFlat(position)
+                index = toFlat(position)
                 self.voxels[index] = type
                 self.constructMesh()
 
@@ -188,73 +201,20 @@ class Chunk:
         self.mesh = []
         filtered_voxels = np.argwhere(self.voxels != 0)
         for voxel_index in filtered_voxels:
-            voxel_pos = pg.Vector3(self.__To3d(voxel_index))
+            voxel_pos = pg.Vector3(to3d(voxel_index))
 
             for face_index, face_normal in enumerate(FACE_NORMALS):
                 # Interior Face Culling
                 check_pos = voxel_pos + face_normal
                 neighbour_type = self.getVoxel(check_pos)
                 if neighbour_type == 0:
-
+                    
                     voxel_world_pos = tuple((chunk_offset + pg.Vector3(voxel_pos)))
 
                     voxel_type = self.getVoxel(voxel_pos)
 
                     self.mesh.append(Face(voxel_world_pos, face_index, voxel_type))
 
-    def __ToFlat(self, position):
-        """
-        This function is used when converting from local chunk positions to indices to access data in the chunk array
-        """
-        # Convert a 3d position to a 1d index
-        index = position[0] + (position[1] * CHUNK_SIZE) + (position[2] * CHUNK_AREA)
-        return int(index)
-    
-    def __To3d(self, index):
-        """
-        This function converts from an index in the chunk array to a 3d position in the chunk
-        """
-
-        # Convert a 1d index to a 3d position
-        index = int(index[0])  # index[0] because index is a numpy array, so it shouldnt be directly used
-
-        z = int(index / CHUNK_AREA)
-        index -= z * CHUNK_AREA
-
-        y = int(index / CHUNK_SIZE)
-
-        x = int(index % CHUNK_SIZE)     
-
-        return (x, y, z)   
-
-    def __getChunkData(self):
-        """
-        Get the voxel data for this chunk
-        Either from the file or the terrain generator
-        """
-        already_generated = False
-        if already_generated:
-            # Load From File
-            pass
-        else:
-            return self.__generateTerrain()
-
-    def __generateTerrain(self):
-        """
-        Procedurally generate the chunk terrain
-        """
-
-        voxels = np.zeros(CHUNK_VOLUME, dtype=int)
-        for i in range(CHUNK_SIZE):
-            for j in range(CHUNK_SIZE):
-                if self.position[1] == 0:
-                    voxel_type = (math.sqrt(((i+self.position[0]*CHUNK_SIZE)**2)%80+
-                                            ((j+self.position[2]*CHUNK_SIZE)**2)%80)//2
-                                ) %3+1
-                    index = self.__ToFlat((i, 0, j))
-
-                    voxels[index] = voxel_type
-        return voxels
 
 
 class Renderer:
@@ -301,6 +261,14 @@ class Renderer:
         pg.draw.polygon(self.surface, color, points, width=WIREFRAME)
 
 
+class Face:
+    def __init__(self, position, index, type):
+        self.position = position  # (x,y,z) of the origin of the face
+        self.index = index  # Index of the face - Indexes into FACE_NORMALS
+        self.colour = voxel_types[type - 1]
+
+
+# TODO - refactor this entire hacked solution
 def processMesh(mesh, camera_position, camera_rotation):
     # Using the mesh, return a list of faces that must be drawn
     processed_mesh = []  # (Points, Colour, Depth)
@@ -312,13 +280,11 @@ def processMesh(mesh, camera_position, camera_rotation):
     for face in mesh:
         processed_face = processFace(face.position, face.index, sin_yaw, cos_yaw, sin_pitch, cos_pitch, camera_position)
         if processed_face != None:
-            if processed_face[0] != None:
-                points, depth = processed_face
-                processed_mesh.append((points, face.colour, depth))
+            points, depth = processed_face
+            processed_mesh.append((points, face.colour, depth))
     return processed_mesh
 
-    
-@njit
+@njit(fastmath=True)
 def processFace(voxel_position, face_index, sin_yaw, cos_yaw, sin_pitch, cos_pitch, camera_position):
         """
         - Translate face
@@ -376,18 +342,21 @@ def processFace(voxel_position, face_index, sin_yaw, cos_yaw, sin_pitch, cos_pit
             return None
 
         # processed_face will always have length 4, so .append() is not needed
-        processed_face = []
+        processed_face = np.empty((4, 2), dtype=np.int32)
 
-        inside = False
+        inside = False  # Flag that stores if any vertices of the face are inside the window
 
-        for i, vertex_index in enumerate(FACES[face_index]):
+        face_vertex_indices = FACES[face_index]
+
+        for i in prange(len(face_vertex_indices)):
+            vertex_index = face_vertex_indices[i]
             model_vertex_position = VERTICES[vertex_index]  # Indexes into the VERTICES array
             
             vertex = (
                         relative_voxel_position[0] + model_vertex_position[0],
                         relative_voxel_position[1] + model_vertex_position[1],
                         relative_voxel_position[2] + model_vertex_position[2]
-                    ) 
+                    )
 
             x, y, z = vertex
             x, z = x * cos_yaw + z * sin_yaw, -x * sin_yaw + z * cos_yaw
@@ -399,34 +368,42 @@ def processFace(voxel_position, face_index, sin_yaw, cos_yaw, sin_pitch, cos_pit
             projected_y = ((vertex[1] / vertex[2]) + 1) * CENTRE[1]
 
             # Frustum Culling - Don't render if not in view frustum
-            if vertex[2] < 0.1:
+            if vertex[2] < NEAR:
                 return None
+            # If any vertex is inside the window, render the face
             if 0 <= projected_x <= WIDTH or 0 <= projected_y <= HEIGHT:
                 inside = True
 
-            processed_face.append((int(projected_x), int(projected_y)))
+            processed_face[i][0] = np.int32(projected_x)
+            processed_face[i][1] = np.int32(projected_y)
+
 
         if not inside:
             return None
 
+        # Since only the relative depth matters, we can skip the costly sqrt() function
         depth = (relative_voxel_position[0]**2 + relative_voxel_position[1]**2 + relative_voxel_position[2]**2)
+        #depth = np.linalg.norm(relative_voxel_position)
 
         return processed_face, depth
 
 
-class Face:
-    def __init__(self, position, index, type):
-        self.position = position  # (x,y,z) of the origin of the face
-        self.index = index  # Index of the face - Indexes into FACE_NORMALS
-        self.colour = voxel_types[type - 1]
-    
-    def toCameraSpace(self, camera_position):
-        # Translates the face from world space, with (0, 0, 0) at the origin,
-        # to camera space, with (0, 0, 0) at the camera's position
-        return (
-            self.position[0] - camera_position[0],
-            self.position[1] - camera_position[1],
-            self.position[2] - camera_position[2])
+def generateTerrain(position):
+    """
+    Procedurally generate the chunk terrain
+    """
+
+    voxels = np.zeros(CHUNK_VOLUME, dtype=np.int8)  # Int8 is used to decrease memory usage - much smaller than float
+    for i in range(CHUNK_SIZE):
+        for j in range(CHUNK_SIZE):
+            if position[1] == 0:
+                voxel_type = (math.sqrt(((i+position[0]*CHUNK_SIZE)**2)%80+
+                                        ((j+position[2]*CHUNK_SIZE)**2)%80)//2
+                            ) %3+1
+                index = toFlat((i, 0, j))
+
+                voxels[index] = np.int16(voxel_type)
+    return voxels
 
 
 pg.init()
@@ -437,10 +414,12 @@ clock = pg.time.Clock()
 previous_time = 0
 
 camera = Camera((0, -2, 0), (0, 0, 0))
-world = World()
+world = World(WORLD_NAME)
 renderer = Renderer(screen)
 
-# Mouse lock
+held_voxel_type = 1
+
+# Mouse lock>>
 if GRAB_MOUSE:
     pg.mouse.set_visible(False)
     pg.event.set_grab(True)
@@ -459,21 +438,32 @@ while running:
         if event.type == pg.MOUSEMOTION:
             relative_mouse_movement = event.rel
             camera.rotate(relative_mouse_movement, delta)
+
+    # Voxel Placing - TODO complete and refactor
+    if pg.mouse.get_pressed()[2]:
+        world.setVoxel((int(camera.position.x), int(camera.position.y), int(camera.position.z)), held_voxel_type)
+    if pg.mouse.get_pressed()[0]:
+        world.setVoxel((int(camera.position.x), int(camera.position.y), int(camera.position.z)), 0)
+
     keys = pg.key.get_pressed()
 
     if keys[pg.K_ESCAPE]:
         running = False
-
+    
     camera.move(keys, 1/delta)
 
     world.update(camera)
 
     # Render
-    screen.fill((32, 32, 32))
+    screen.fill(BACKGROUND_COLOR)
     renderer.render(world.mesh)
     pg.display.set_caption(f"Fps: {fps}")
 
     pg.display.flip()
     clock.tick(MAX_FPS)
+
+
+for chunk in world.chunks:
+    world.unloadChunk(chunk.position)
 
 pg.quit()
