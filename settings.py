@@ -42,7 +42,6 @@ OCTAVES = 2
 SEED = 10247
 NOISE = PerlinNoise(octaves=OCTAVES, seed=SEED)
 
-WORLD_NAME = "world1"
 
 
 def clamp(n, minn, maxn):

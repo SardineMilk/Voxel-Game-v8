@@ -51,7 +51,7 @@ class World:
         return voxel
 
     def setVoxel(self, position, type):
-        chunk_position, local_position = self.__worldToLocal(position)
+        chunk_position, local_position = self.__worldToLocal(tuple(position))
         chunk = self.__getChunk(chunk_position)
         chunk.setVoxel(local_position, type)
         self.changed = True
@@ -129,10 +129,10 @@ class World:
     def loadChunk(self, position):
         try:
             # Load chunk data from file
-            file_name = self.name +"/"+ str(tuple(position))+".npy"
+            file_name = self.__getFilePath(str(tuple(position)))+".npy"
             voxels = np.load(file_name)
         except OSError:
-            voxels = generateTerrain(position)
+            voxels = terrain_generator.generateChunk(position)
 
         self.chunks.append(Chunk(position, voxels))
 
@@ -140,10 +140,14 @@ class World:
         # Unload a chunk, saving it to file
         chunk = self.__getChunk(position)
 
-        file_name = self.name +"/"+ str(chunk.position)
+        file_name = self.__getFilePath(str(tuple(position)))
         np.save(file_name, chunk.voxels)
 
         self.chunks.remove(chunk)
+
+    def __getFilePath(self, file_name):
+        return self.name + "/" + file_name
+
 
 class Chunk:
     def __init__(self, position, voxels):
@@ -246,12 +250,16 @@ class Renderer:
         if len(mesh) == 0:
             return
         
-        processed_mesh = processMesh(mesh, tuple(camera.position), tuple(camera.rotation))
+        processed_mesh = processMesh(mesh, tuple(player.position), tuple(player.rotation))
 
         if len(processed_mesh) == 0:
             return
-            
-        sorted_mesh = sorted(processed_mesh, key=lambda x: x[2])[::-1]
+        
+        if INSERTION_SORT:
+            sorted_mesh = self.__sortFaces(processed_mesh)
+        else:
+            sorted_mesh = sorted(processed_mesh, key=lambda x: x[2])[::-1]
+
 
         for face in sorted_mesh:
             pg.draw.polygon(self.surface, face[1], face[0], width=WIREFRAME)
@@ -260,12 +268,69 @@ class Renderer:
         points, color = face
         pg.draw.polygon(self.surface, color, points, width=WIREFRAME)
 
+    def __sortFaces(self, mesh):
+        # Sort the mesh based on depth in reverse order
+        for i in range(1, len(mesh)):
+            j = i
+            temp = mesh[i]
+            while j >= 0 and mesh[j-1][2] < temp[2]:
+                mesh[j] = mesh[j-1]
+                j -= 1
+            mesh[j] = temp
+        return mesh
+
+
 
 class Face:
     def __init__(self, position, index, type):
         self.position = position  # (x,y,z) of the origin of the face
-        self.index = index  # Index of the face - Indexes into FACE_NORMALS
+        self.index = index
+        self.normal = FACE_NORMALS[index]  # Index of the face - Indexes into FACE_NORMALS
         self.colour = voxel_types[type - 1]
+
+
+class TerrainGenerator:
+    def __init__(self, seed):
+        self.seed = seed
+    
+    def sample(self, position):
+        # TODO add proper perlin sampling
+        if position[1] == 0:
+            voxel_type = (math.sqrt(((position[0]*CHUNK_SIZE)**2)+
+                            ((position[2]*CHUNK_SIZE)**2))//2
+                ) %3+1
+            return voxel_type
+        else:
+            return 0
+    
+    def generateChunk(self, position):
+        voxels = np.zeros(CHUNK_VOLUME, dtype=np.uint8)  # Int8 is used to decrease memory usage - much smaller than float
+        for x in range(CHUNK_SIZE):
+            for y in range(CHUNK_SIZE):
+                    for z in range(CHUNK_SIZE):
+                        world_x = x + (position[0]*CHUNK_SIZE)
+                        world_y = y + (position[1]*CHUNK_SIZE)
+                        world_z = z + (position[2]*CHUNK_SIZE)
+
+                        voxel_type = self.sample((world_x, world_y, world_z))
+
+                        index = toFlat((x, y, z))
+
+                        voxels[index] = np.int16(voxel_type)
+        return voxels
+
+
+class Player(Camera):
+    def __init__(self, starting_position, starting_rotation):
+        super().__init__(starting_position, starting_rotation)
+    
+    def placeVoxels(self):
+        # Voxel Placing - TODO complete and refactor
+        if pg.mouse.get_pressed()[2]:
+            world.setVoxel((int(self.position.x), int(self.position.y), int(self.position.z)), held_voxel_type)
+        if pg.mouse.get_pressed()[0]:
+            world.setVoxel((int(self.position.x), int(self.position.y), int(self.position.z)), 0)
+
 
 
 # TODO - refactor this entire hacked solution
@@ -293,7 +358,7 @@ def processFace(voxel_position, face_index, sin_yaw, cos_yaw, sin_pitch, cos_pit
             - Project
             - Return processed_face
         """
-        #TODO pass these as parameters
+        #TODO refactor these away
         VERTICES = [
             (-0.5, -0.5, -0.5),
             (0.5, -0.5, -0.5),
@@ -328,14 +393,8 @@ def processFace(voxel_position, face_index, sin_yaw, cos_yaw, sin_pitch, cos_pit
                                     voxel_position[2] - camera_position[2]
                                 )  # Relative to the camera - (0, 0, 0) is the camera position
 
-        # This performs backface culling
         normal = FACE_NORMALS[face_index]
-        face_to_camera = (
-                            relative_voxel_position[0] * normal[0] +
-                            relative_voxel_position[1] * normal[1] +
-                            relative_voxel_position[2] * normal[2] 
-                        )
-        is_visible =  (face_to_camera <= -0.5)
+        is_visible = checkBackfaceVisibility(normal, relative_voxel_position)
         
         # If it's culled, skip the rest of the function
         if not is_visible:
@@ -363,13 +422,12 @@ def processFace(voxel_position, face_index, sin_yaw, cos_yaw, sin_pitch, cos_pit
             y, z = y * cos_pitch - z * sin_pitch, y * sin_pitch + z * cos_pitch
             vertex = x, y, z
 
-
-            projected_x = ((vertex[0] / vertex[2]) + 1) * CENTRE[0]
-            projected_y = ((vertex[1] / vertex[2]) + 1) * CENTRE[1]
-
             # Frustum Culling - Don't render if not in view frustum
             if vertex[2] < NEAR:
                 return None
+
+            projected_x, projected_y = projectVertex(vertex)
+            
             # If any vertex is inside the window, render the face
             if 0 <= projected_x <= WIDTH or 0 <= projected_y <= HEIGHT:
                 inside = True
@@ -388,23 +446,29 @@ def processFace(voxel_position, face_index, sin_yaw, cos_yaw, sin_pitch, cos_pit
         return processed_face, depth
 
 
-def generateTerrain(position):
-    """
-    Procedurally generate the chunk terrain
-    """
+@njit(fastmath=True)
+def checkBackfaceVisibility(normal, relative_position):
+        face_to_camera = (
+                        relative_position[0] * normal[0] +
+                        relative_position[1] * normal[1] +
+                        relative_position[2] * normal[2] 
+                        )
+        is_visible =  (face_to_camera <= -0.5)
+        return is_visible
+        
+@njit(fastmath=True)
+def projectVertex(vertex):
+    projected_x = ((vertex[0] / vertex[2]) + 1) * CENTRE[0]
+    projected_y = ((vertex[1] / vertex[2]) + 1) * CENTRE[1]
+    return projected_x, projected_y
 
-    voxels = np.zeros(CHUNK_VOLUME, dtype=np.int8)  # Int8 is used to decrease memory usage - much smaller than float
-    for i in range(CHUNK_SIZE):
-        for j in range(CHUNK_SIZE):
-            if position[1] == 0:
-                voxel_type = (math.sqrt(((i+position[0]*CHUNK_SIZE)**2)%80+
-                                        ((j+position[2]*CHUNK_SIZE)**2)%80)//2
-                            ) %3+1
-                index = toFlat((i, 0, j))
+def fetchVoxelTypesFromDatabase():
+    # Query the database for existing voxel types
+    return 
 
-                voxels[index] = np.int16(voxel_type)
-    return voxels
-
+def addVoxelTypeToDatabase(voxel_colour, transparent):
+    # Append a new voxel type to the database
+    pass
 
 pg.init()
 
@@ -413,11 +477,14 @@ screen = pg.display.set_mode((WIDTH, HEIGHT), flags=pg.DOUBLEBUF)
 clock = pg.time.Clock()
 previous_time = 0
 
-camera = Camera((0, -2, 0), (0, 0, 0))
-world = World(WORLD_NAME)
-renderer = Renderer(screen)
-
 held_voxel_type = 1
+world_name = "world1"
+
+player = Player((0, -2, 0), (0, 0, 0))
+world = World(world_name)
+renderer = Renderer(screen)
+terrain_generator = TerrainGenerator(SEED)
+
 
 # Mouse lock>>
 if GRAB_MOUSE:
@@ -437,22 +504,17 @@ while running:
     for event in pg.event.get():  
         if event.type == pg.MOUSEMOTION:
             relative_mouse_movement = event.rel
-            camera.rotate(relative_mouse_movement, delta)
-
-    # Voxel Placing - TODO complete and refactor
-    if pg.mouse.get_pressed()[2]:
-        world.setVoxel((int(camera.position.x), int(camera.position.y), int(camera.position.z)), held_voxel_type)
-    if pg.mouse.get_pressed()[0]:
-        world.setVoxel((int(camera.position.x), int(camera.position.y), int(camera.position.z)), 0)
+            player.rotate(relative_mouse_movement, delta)
 
     keys = pg.key.get_pressed()
 
     if keys[pg.K_ESCAPE]:
         running = False
     
-    camera.move(keys, 1/delta)
+    player.move(keys, 1/delta)
+    player.placeVoxels()
 
-    world.update(camera)
+    world.update(player)
 
     # Render
     screen.fill(BACKGROUND_COLOR)
