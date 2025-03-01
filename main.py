@@ -7,6 +7,8 @@ class Camera:
         self.rotation = pg.Vector3(starting_rotation)
     
     def move(self, keys, delta: int):
+        # Requirement - U3
+
         speed = PLAYER_SPEED / (delta*1000)
         yaw = math.radians(self.rotation.x)
 
@@ -28,6 +30,8 @@ class Camera:
             self.position.y += speed
 
     def rotate(self, mouse_movement: tuple[int, int], delta:int):
+        # Requirement - U3
+
         yaw   = mouse_movement[0] * PLAYER_ROTATION_SENSITIVITY * (delta / 1000)
         pitch = mouse_movement[1] * PLAYER_ROTATION_SENSITIVITY * (delta / 1000)
 
@@ -127,6 +131,7 @@ class World:
         return tuple(chunk_index), tuple(local_index)
 
     def loadChunk(self, position):
+        # Requirement - U2
         try:
             # Load chunk data from file
             file_name = self.__getFilePath(str(tuple(position)))+".npy"
@@ -137,6 +142,7 @@ class World:
         self.chunks.append(Chunk(position, voxels))
 
     def unloadChunk(self, position):
+        # Requirement - U2
         # Unload a chunk, saving it to file
         chunk = self.__getChunk(position)
 
@@ -220,7 +226,6 @@ class Chunk:
                     self.mesh.append(Face(voxel_world_pos, face_index, voxel_type))
 
 
-
 class Renderer:
     """
     This class's purpose is to take in the mesh and render the faces to the screen.
@@ -280,21 +285,35 @@ class Renderer:
         return mesh
 
 
-
 class Face:
     def __init__(self, position, index, type):
-        self.position = position  # (x,y,z) of the origin of the face
         self.index = index
+        self.position = position  # (x,y,z) of the origin of the face
         self.normal = FACE_NORMALS[index]  # Index of the face - Indexes into FACE_NORMALS
+        self.mesh = self.__generateMesh()
+
         self.colour = voxel_types[type - 1]
+
+    def __generateMesh(self):
+        vertex_indices = FACES[self.index]
+        mesh = np.empty((4, 3), dtype=np.float32)
+        for i, vertex_index in enumerate(vertex_indices):
+            vertex = VERTICES[vertex_index]
+
+            translated_vertex = np.array((
+                vertex[0] + self.position[0],
+                vertex[1] + self.position[1],
+                vertex[2] + self.position[2],
+            ), dtype=np.float32)
+
+            mesh[i] = np.array(translated_vertex, dtype=np.float32)
+
+        return mesh
+        
 
 
 class TerrainGenerator:
-    def __init__(self, seed):
-        self.seed = seed
-    
     def sample(self, position):
-        # TODO add proper perlin sampling
         if position[1] == 0:
             voxel_type = (math.sqrt(((position[0]*CHUNK_SIZE)**2)+
                             ((position[2]*CHUNK_SIZE)**2))//2
@@ -302,6 +321,7 @@ class TerrainGenerator:
             return voxel_type
         else:
             return 0
+
     
     def generateChunk(self, position):
         voxels = np.zeros(CHUNK_VOLUME, dtype=np.uint8)  # Int8 is used to decrease memory usage - much smaller than float
@@ -323,80 +343,59 @@ class TerrainGenerator:
 class Player(Camera):
     def __init__(self, starting_position, starting_rotation):
         super().__init__(starting_position, starting_rotation)
+
+    def updateVoxelType(self, mouse_wheel_y):
+            self.voxel_type += mouse_wheel_y
+
+            # If it goes out of bounds, loop to the other end of list
+            if self.voxel_type > len(voxel_types) - 1:
+                self.voxel_type = 0
+            if self.voxel_type < 1:
+                # 1 is used because 0 is empty, bound to left click
+                self.voxel_type = len(voxel_types) - 1
     
     def placeVoxels(self):
-        # Voxel Placing - TODO complete and refactor
+        # Requirement - U1
+        
+        # Voxel Placing - TODO complete
+        placing_pos = (int(self.position.x), int(self.position.y), int(self.position.z))
         if pg.mouse.get_pressed()[2]:
-            world.setVoxel((int(self.position.x), int(self.position.y), int(self.position.z)), held_voxel_type)
+            world.setVoxel(placing_pos , self.voxel_type)
         if pg.mouse.get_pressed()[0]:
-            world.setVoxel((int(self.position.x), int(self.position.y), int(self.position.z)), 0)
+            world.setVoxel(placing_pos, 0)
 
 
 
-# TODO - refactor this entire hacked solution
 def processMesh(mesh, camera_position, camera_rotation):
     # Using the mesh, return a list of faces that must be drawn
     processed_mesh = []  # (Points, Colour, Depth)
+
+    # These values are unique to each frame, so computing them per face is redundant
     sin_yaw =   math.sin(math.radians(-camera_rotation[0]))
     cos_yaw =   math.cos(math.radians(-camera_rotation[0]))
     sin_pitch = math.sin(math.radians(camera_rotation[1]))
     cos_pitch = math.cos(math.radians(camera_rotation[1]))
     
     for face in mesh:
-        processed_face = processFace(face.position, face.index, sin_yaw, cos_yaw, sin_pitch, cos_pitch, camera_position)
+        processed_face = processFace(face.mesh, face.position, face.normal, camera_position, sin_yaw, cos_yaw, sin_pitch, cos_pitch)
         if processed_face != None:
             points, depth = processed_face
             processed_mesh.append((points, face.colour, depth))
     return processed_mesh
 
 @njit(fastmath=True)
-def processFace(voxel_position, face_index, sin_yaw, cos_yaw, sin_pitch, cos_pitch, camera_position):
+def processFace(face_mesh, voxel_position, face_normal, camera_position, sin_yaw, cos_yaw, sin_pitch, cos_pitch):
         """
-        - Translate face
+        - Check backface visibility
         If face is visible:
             - Rotate
             - Project
             - Return processed_face
         """
-        #TODO refactor these away
-        VERTICES = [
-            (-0.5, -0.5, -0.5),
-            (0.5, -0.5, -0.5),
-            (0.5, 0.5, -0.5),
-            (-0.5, 0.5, -0.5),
-            (-0.5, -0.5, 0.5),
-            (0.5, -0.5, 0.5),
-            (0.5, 0.5, 0.5),
-            (-0.5, 0.5, 0.5),
-        ]
 
-        FACES = [
-            (0, 1, 2, 3),  # Front face
-            (4, 5, 6, 7),  # Back face
-            (4, 0, 3, 7),  # Left face
-            (1, 5, 6, 2),  # Right face
-            (4, 5, 1, 0),  # Top face
-            (3, 2, 6, 7),  # Bottom face
-        ]
-
-        FACE_NORMALS = [
-            (0, 0, -1),
-            (0, 0, 1),
-            (-1, 0, 0),
-            (1, 0, 0),
-            (0, -1, 0),
-            (0, 1, 0),
-        ]
-        relative_voxel_position = (
-                                    voxel_position[0] - camera_position[0],
-                                    voxel_position[1] - camera_position[1],
-                                    voxel_position[2] - camera_position[2]
-                                )  # Relative to the camera - (0, 0, 0) is the camera position
-
-        normal = FACE_NORMALS[face_index]
-        is_visible = checkBackfaceVisibility(normal, relative_voxel_position)
+        is_visible = checkBackfaceVisibility(face_normal, voxel_position, camera_position)
         
-        # If it's culled, skip the rest of the function
+        # If it's not visible, skip the rest of the function
         if not is_visible:
             return None
 
@@ -405,29 +404,24 @@ def processFace(voxel_position, face_index, sin_yaw, cos_yaw, sin_pitch, cos_pit
 
         inside = False  # Flag that stores if any vertices of the face are inside the window
 
-        face_vertex_indices = FACES[face_index]
+        for i, vertex in enumerate(face_mesh):
+            translated_vertex = (
+                vertex[0] - camera_position[0],
+                vertex[1] - camera_position[1],
+                vertex[2] - camera_position[2],
+            )
 
-        for i in prange(len(face_vertex_indices)):
-            vertex_index = face_vertex_indices[i]
-            model_vertex_position = VERTICES[vertex_index]  # Indexes into the VERTICES array
-            
-            vertex = (
-                        relative_voxel_position[0] + model_vertex_position[0],
-                        relative_voxel_position[1] + model_vertex_position[1],
-                        relative_voxel_position[2] + model_vertex_position[2]
-                    )
-
-            x, y, z = vertex
+            x, y, z = translated_vertex
             x, z = x * cos_yaw + z * sin_yaw, -x * sin_yaw + z * cos_yaw
             y, z = y * cos_pitch - z * sin_pitch, y * sin_pitch + z * cos_pitch
-            vertex = x, y, z
+            rotated_vertex = x, y, z
 
             # Frustum Culling - Don't render if not in view frustum
-            if vertex[2] < NEAR:
+            if rotated_vertex[2] < NEAR:
                 return None
-
-            projected_x, projected_y = projectVertex(vertex)
             
+            projected_x, projected_y = projectVertex(rotated_vertex)
+
             # If any vertex is inside the window, render the face
             if 0 <= projected_x <= WIDTH or 0 <= projected_y <= HEIGHT:
                 inside = True
@@ -435,23 +429,23 @@ def processFace(voxel_position, face_index, sin_yaw, cos_yaw, sin_pitch, cos_pit
             processed_face[i][0] = np.int32(projected_x)
             processed_face[i][1] = np.int32(projected_y)
 
-
+        # If no vertices are inside the window, don't render the face
         if not inside:
             return None
 
         # Since only the relative depth matters, we can skip the costly sqrt() function
-        depth = (relative_voxel_position[0]**2 + relative_voxel_position[1]**2 + relative_voxel_position[2]**2)
+        depth = ((voxel_position[0] - camera_position[0])**2 + (voxel_position[1] - camera_position[1])**2 + (voxel_position[2] - camera_position[2])**2)
         #depth = np.linalg.norm(relative_voxel_position)
 
         return processed_face, depth
 
 
 @njit(fastmath=True)
-def checkBackfaceVisibility(normal, relative_position):
+def checkBackfaceVisibility(normal, voxel_position, camera_position):
         face_to_camera = (
-                        relative_position[0] * normal[0] +
-                        relative_position[1] * normal[1] +
-                        relative_position[2] * normal[2] 
+                        (voxel_position[0] - camera_position[0]) * normal[0] +
+                        (voxel_position[1] - camera_position[1]) * normal[1] +
+                        (voxel_position[2] - camera_position[2]) * normal[2] 
                         )
         is_visible =  (face_to_camera <= -0.5)
         return is_visible
@@ -481,9 +475,11 @@ held_voxel_type = 1
 world_name = "world1"
 
 player = Player((0, -2, 0), (0, 0, 0))
+player.voxel_type = held_voxel_type
+
 world = World(world_name)
 renderer = Renderer(screen)
-terrain_generator = TerrainGenerator(SEED)
+terrain_generator = TerrainGenerator()
 
 
 # Mouse lock>>
@@ -502,9 +498,15 @@ while running:
 
     # Player logic
     for event in pg.event.get():  
+        # Camera Rotation
         if event.type == pg.MOUSEMOTION:
             relative_mouse_movement = event.rel
             player.rotate(relative_mouse_movement, delta)
+
+        # Voxel Type 
+        if event.type == pg.MOUSEWHEEL:
+            player.updateVoxelType(event.y)
+
 
     keys = pg.key.get_pressed()
 
@@ -517,7 +519,7 @@ while running:
     world.update(player)
 
     # Render
-    screen.fill(BACKGROUND_COLOR)
+    screen.fill(SKY_COLOR)
     renderer.render(world.mesh)
     pg.display.set_caption(f"Fps: {fps}")
 

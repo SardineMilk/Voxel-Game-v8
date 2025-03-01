@@ -10,18 +10,20 @@ GRAB_MOUSE = True  # Hide the mouse and lock it to the centre of the window
 WIREFRAME = False # Render a wireframe instead of the filled faces
 INSERTION_SORT = False
 
-# The width and height of the window the game is displayed on
-WIDTH, HEIGHT =  1000, 1000
+# Window
+WIDTH, HEIGHT =  1080, 1080
 CENTRE = (WIDTH//2, HEIGHT//2)
 ASPECT_RATIO = WIDTH / HEIGHT
+MAX_FPS = 120    
 
-# Rendering
-BACKGROUND_COLOR = (50, 48, 37)  #Gruvbox
-BACKGROUND_COLOR = (32, 32, 32)
+# World TODO refactor into database
+SKY_COLOR = (135, 206, 235)
 WIREFRAME_COLOR = (0, 127, 0)
 
-# The maximum number of times the main loop can run per second
-MAX_FPS = 120    
+# The size, area and volume of a single chunk
+CHUNK_SIZE = 16
+CHUNK_AREA = CHUNK_SIZE**2
+CHUNK_VOLUME = CHUNK_SIZE**3
 
 # Player variables
 PLAYER_SPEED = 5  # Voxels per second
@@ -31,21 +33,6 @@ RENDER_DISTANCE = 4
 
 # Clipping plane(s)
 NEAR = 0.1
-
-# The size, area and volume of a single chunk
-CHUNK_SIZE = 16
-CHUNK_AREA = CHUNK_SIZE**2
-CHUNK_VOLUME = CHUNK_SIZE**3
-
-# World Generation
-OCTAVES = 2
-SEED = 10247
-NOISE = PerlinNoise(octaves=OCTAVES, seed=SEED)
-
-
-
-def clamp(n, minn, maxn):
-    return max(minn, min(n, maxn))
 
 
 VERTICES = [
@@ -77,21 +64,18 @@ FACE_NORMALS = [
     (0, 1, 0),
 ]
 
-
-# Gruvbox
 voxel_types = [
-    (69, 133, 136),
-    (177, 98, 134),
-    (250, 189, 47),
-    (231, 215, 173),
-]
-
-voxel_types = [
-    (10, 127, 127),
-    (127, 10, 127),
-    (127, 127, 10),
+    (127, 16, 70),
+    (127, 108, 0),
+    (16, 88, 127),
     (127, 127, 127),
 ]
+
+
+def clamp(n, minn, maxn):
+    return max(minn, min(n, maxn))
+
+
 
 def toFlat(position):
     """
