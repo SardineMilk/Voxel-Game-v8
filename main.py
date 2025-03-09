@@ -6,9 +6,12 @@ class Camera:
         self.position = pg.Vector3(starting_position)
         self.rotation = pg.Vector3(starting_rotation)
     
-    def move(self, keys, delta: int):
+    def move(self, keys, delta):
         # Requirement - U3
+        # Requirement - FI1
 
+
+        delta = 1/delta
         speed = PLAYER_SPEED / (delta*1000)
         yaw = math.radians(self.rotation.x)
 
@@ -31,6 +34,7 @@ class Camera:
 
     def rotate(self, mouse_movement: tuple[int, int], delta:int):
         # Requirement - U3
+        # Requirement - FI2
 
         yaw   = mouse_movement[0] * PLAYER_ROTATION_SENSITIVITY * (delta / 1000)
         pitch = mouse_movement[1] * PLAYER_ROTATION_SENSITIVITY * (delta / 1000)
@@ -61,12 +65,16 @@ class World:
         self.changed = True
 
     def update(self, camera):
-        self.updateRenderedChunks(camera.position)
+        # Update loaded chunks based on player position
+        self.updateRenderedChunks(camera.position)  # Requirement - FP7
+        # Reconstruct mesh if needed
         if self.changed:
-            self.constructMesh()
+            self.constructMesh()  # Requirement - FP8
         self.changed = False
 
     def updateRenderedChunks(self, player_pos):
+        # Requirement - U5
+
         chunks_to_load = []
         # Builds a list of chunks that need to be loaded
         for i in range(RENDER_DISTANCE ** 3):
@@ -200,10 +208,8 @@ class Chunk:
         It takes the form of a list, with each element being a Face object
 
         The face_index determines which side of the voxel the face belongs to, with the lookup table stored in settings.py
-        TODO move from settings.py (voxel.py?)
 
-        The voxel_type is technically uneeded, as world.getVoxel(voxel_world_pos) can be called to get the type
-        However, it gives a massive performance boost
+
         """
 
         chunk_offset = pg.Vector3(self.position)*CHUNK_SIZE
@@ -244,9 +250,6 @@ class Renderer:
     def __init__(self, surface):
         # The surface the renderer will draw on
         self.surface = surface
-
-        # Vectorise the drawFace function
-        self.drawMesh = np.vectorize(self.__drawFace)
     
     def render(self, mesh):
         """
@@ -267,13 +270,28 @@ class Renderer:
 
 
         for face in sorted_mesh:
+            # Requirement - FO1
             pg.draw.polygon(self.surface, face[1], face[0], width=WIREFRAME)
 
-    def __drawFace(self, face):
-        points, color = face
-        pg.draw.polygon(self.surface, color, points, width=WIREFRAME)
+        self.renderUI()
+
+    def renderUI(self):
+        # Requirement - U6
+        # Requirement - FO2
+
+        # Crosshair
+        pg.draw.circle(self.surface,  (255, 255, 255), CENTRE, 1)
+
+        # Held Voxel
+        pg.draw.rect(self.surface, (0, 0, 0), ((0, HEIGHT-102), (102, 102)), 2)
+        pg.draw.rect(self.surface, voxel_types[player.voxel_type-1], ((0, HEIGHT-100), (100, 100)))
+
+        # FPS text
+        text = font.render(f"FPS: {str(fps)}", True, (255, 255, 255))
+        screen.blit(text)
 
     def __sortFaces(self, mesh):
+        # Requirement - FP10
         # Sort the mesh based on depth in reverse order
         for i in range(1, len(mesh)):
             j = i
@@ -287,15 +305,19 @@ class Renderer:
 
 class Face:
     def __init__(self, position, index, type):
-        self.index = index
+        """
+        The colour/type is technically uneeded, as world.getVoxel(voxel_world_pos) can be called to get the type
+        However, it gives a massive performance boost due to preventing redundant calculations
+        """
         self.position = position  # (x,y,z) of the origin of the face
         self.normal = FACE_NORMALS[index]  # Index of the face - Indexes into FACE_NORMALS
+        self.colour = voxel_types[type - 1]
+        self.__index = index
+
         self.mesh = self.__generateMesh()
 
-        self.colour = voxel_types[type - 1]
-
     def __generateMesh(self):
-        vertex_indices = FACES[self.index]
+        vertex_indices = FACES[self.__index]
         mesh = np.empty((4, 3), dtype=np.float32)
         for i, vertex_index in enumerate(vertex_indices):
             vertex = VERTICES[vertex_index]
@@ -306,10 +328,9 @@ class Face:
                 vertex[2] + self.position[2],
             ), dtype=np.float32)
 
-            mesh[i] = np.array(translated_vertex, dtype=np.float32)
+            mesh[i] = translated_vertex
 
         return mesh
-        
 
 
 class TerrainGenerator:
@@ -321,8 +342,7 @@ class TerrainGenerator:
             return voxel_type
         else:
             return 0
-
-    
+   
     def generateChunk(self, position):
         voxels = np.zeros(CHUNK_VOLUME, dtype=np.uint8)  # Int8 is used to decrease memory usage - much smaller than float
         for x in range(CHUNK_SIZE):
@@ -343,13 +363,16 @@ class TerrainGenerator:
 class Player(Camera):
     def __init__(self, starting_position, starting_rotation):
         super().__init__(starting_position, starting_rotation)
+        self.voxel_type = 1
 
     def updateVoxelType(self, mouse_wheel_y):
+            # Requirement - FI4
+
             self.voxel_type += mouse_wheel_y
 
             # If it goes out of bounds, loop to the other end of list
             if self.voxel_type > len(voxel_types) - 1:
-                self.voxel_type = 0
+                self.voxel_type = 1
             if self.voxel_type < 1:
                 # 1 is used because 0 is empty, bound to left click
                 self.voxel_type = len(voxel_types) - 1
@@ -359,12 +382,148 @@ class Player(Camera):
         
         # Voxel Placing - TODO complete
         placing_pos = (int(self.position.x), int(self.position.y), int(self.position.z))
+        # Requirement - FI3
         if pg.mouse.get_pressed()[2]:
             world.setVoxel(placing_pos , self.voxel_type)
+        # Requirement - FI3
         if pg.mouse.get_pressed()[0]:
             world.setVoxel(placing_pos, 0)
 
 
+class DatabaseManager:
+    def __init__(self, world_name):
+        self.world_name = world_name
+
+        # Attempt to connect to worlds database
+        self.worlds_database = self.__connectToDatabase("WorldsData", self.createNewWorldsDatabase)
+
+        # Attempt to connect to voxels database
+        self.voxels_database = self.__connectToDatabase(f"{self.world_name}_VoxelsData", self.createNewVoxelsDatabase)
+
+        
+    def __connectToDatabase(self, database_name, create_database_func):
+        retry_attempts = 3
+        for i in range(retry_attempts):
+            print(f"Attempting to connect to {database_name} database: attempt {i}")
+            try:
+                connection = mysql.connector.connect(
+                    host="localhost",
+                    user="root",
+                    password="root",
+                    database=database_name
+                    )
+                print(f"Connected to {database_name} database")
+                return connection
+            except mysql.connector.Error as e:
+                print(f"Could not connect to {database_name} database: {e}")
+                print(f"Creating new {database_name} database")
+                create_database_func()
+
+        raise Exception(f"Failed to connect to {database_name} after {retry_attempts} attempts")
+
+    def fetchWorld(self):
+        with self.worlds_database.cursor() as worlds_cursor:
+            worlds_cursor.execute("SELECT * FROM worlds WHERE world_name = %s", 
+                                (self.world_name,))
+            result = worlds_cursor.fetchall()
+        return result
+
+    def fetchVoxelTypes(self):
+        # Query the database for existing voxel types
+        with self.voxels_database.cursor() as voxels_cursor:
+            voxels_cursor.execute("SELECT * FROM voxel_types")
+            result = voxels_cursor.fetchall()
+        return result
+
+    def addWorld(self, world_name, chunk_size, sky_colour, world_seed):
+        with self.worlds_database.cursor() as worlds_cursor:
+            worlds_cursor.execute("INSERT INTO worlds (world_name, chunk_size, sky_colour_r, sky_colour_g, sky_colour_b, world_seed) VALUES (%s, %d, %d, %d, %d, %d)",
+                                    (world_name, 16, chunk_size, sky_colour[0], sky_colour[1], sky_colour[2], world_seed ))
+        pass
+
+    def addVoxelType(self, voxel_colour, transparent):
+        # Append a new voxel type to the database
+        with self.voxels_database.cursor() as voxels_cursor:
+            voxels_cursor.execute("INSERT INTO voxel_types (red, green, blue, transparent) VALUES (%d, %d, %d, %b)", 
+                                (voxel_colour[0], voxel_colour[1], voxel_colour[2], transparent))
+            self.voxels_database.commit()
+
+    def createNewWorldsDatabase(self):
+        try:
+            mysql_connection = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="root"
+            )
+
+            with mysql_connection.cursor() as cursor:
+                cursor.execute("CREATE DATABASE IF NOT EXISTS WorldsData")
+            mysql_connection.commit()
+            mysql_connection.close()
+
+            # Create Worlds Table
+            worlds_connection = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="root",
+                database="WorldsData"
+            )
+            with worlds_connection.cursor() as cursor:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS worlds (
+                    world_id INT AUTO_INCREMENT PRIMARY KEY,
+                    world_name VARCHAR NOT NULL,
+                    chunk_size INT NOT NULL,
+                    sky_colour_r INT NOT NULL,
+                    sky_colour_g INT NOT NULL,
+                    sky_colour_b INT NOT NULL,
+                    world_seed INT NOT NULL
+                    )
+                """)
+            worlds_connection.commit()
+            worlds_connection.close()
+            
+        except mysql.connector.Error as e:
+            print(f"Error creating WorldsData database: {e}")
+
+    def createNewVoxelsDatabase(self):
+        database_name = f"{self.world_name}_VoxelsData"
+
+        try:
+            mysql_connection = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="root"
+            )
+
+            with mysql_connection.cursor() as cursor:
+                cursor.execute(f"CREATE DATABASE IF NOT EXISTS {database_name}")
+            mysql_connection.commit()
+            mysql_connection.close()       
+
+            # Create Voxels Table
+            voxels_connection = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                password="root",
+                database=database_name
+            )
+            with voxels_connection.cursor() as cursor:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS voxel_types (
+                        voxel_id INT AUTO_INCREMENT PRIMARY KEY,
+                        red INT NOT NULL,
+                        green INT NOT NULL,
+                        blue INT NOT NULL,
+                        transparent BOOLEAN NOT NULL
+                    )
+                """)
+            voxels_connection.commit()
+            voxels_connection.close()
+
+        except mysql.connector.Error as e:
+            print(f"Error creating {database_name} database: {e}")
+    
 
 def processMesh(mesh, camera_position, camera_rotation):
     # Using the mesh, return a list of faces that must be drawn
@@ -383,8 +542,10 @@ def processMesh(mesh, camera_position, camera_rotation):
             processed_mesh.append((points, face.colour, depth))
     return processed_mesh
 
+
 @njit(fastmath=True)
 def processFace(face_mesh, voxel_position, face_normal, camera_position, sin_yaw, cos_yaw, sin_pitch, cos_pitch):
+        # Requirement - FP9
         """
         - Check backface visibility
         If face is visible:
@@ -416,7 +577,7 @@ def processFace(face_mesh, voxel_position, face_normal, camera_position, sin_yaw
             y, z = y * cos_pitch - z * sin_pitch, y * sin_pitch + z * cos_pitch
             rotated_vertex = x, y, z
 
-            # Frustum Culling - Don't render if not in view frustum
+            # Frustum Culling - Don't render if not in view frustum (behind camera)
             if rotated_vertex[2] < NEAR:
                 return None
             
@@ -450,36 +611,31 @@ def checkBackfaceVisibility(normal, voxel_position, camera_position):
         is_visible =  (face_to_camera <= -0.5)
         return is_visible
         
+
 @njit(fastmath=True)
 def projectVertex(vertex):
     projected_x = ((vertex[0] / vertex[2]) + 1) * CENTRE[0]
     projected_y = ((vertex[1] / vertex[2]) + 1) * CENTRE[1]
     return projected_x, projected_y
 
-def fetchVoxelTypesFromDatabase():
-    # Query the database for existing voxel types
-    return 
 
-def addVoxelTypeToDatabase(voxel_colour, transparent):
-    # Append a new voxel type to the database
-    pass
+
 
 pg.init()
 
-screen = pg.display.set_mode((WIDTH, HEIGHT), flags=pg.DOUBLEBUF)
+world_name = "world1"
 
+# Initialise: Requirement - FP1
+screen = pg.display.set_mode((WIDTH, HEIGHT), flags=pg.DOUBLEBUF)
+font = pg.font.Font(None, 24)
 clock = pg.time.Clock()
 previous_time = 0
 
-held_voxel_type = 1
-world_name = "world1"
-
-player = Player((0, -2, 0), (0, 0, 0))
-player.voxel_type = held_voxel_type
-
+player = Player((0, -2, 0), (0, 0, 0)) # Requirement - FP2
 world = World(world_name)
 renderer = Renderer(screen)
 terrain_generator = TerrainGenerator()
+# database = DatabaseManager()  # Requirement - FP3
 
 
 # Mouse lock>>
@@ -492,11 +648,11 @@ running = True
 while running:
     # Time and frame rate
     current_time = pg.time.get_ticks()
-    delta = clamp(current_time - previous_time, 1, 9999)
+    delta = max(current_time - previous_time, 1)
     previous_time = current_time
     fps = round(clock.get_fps(), 2)
 
-    # Player logic
+    # Player logic: Requirement - FP5
     for event in pg.event.get():  
         # Camera Rotation
         if event.type == pg.MOUSEMOTION:
@@ -507,13 +663,18 @@ while running:
         if event.type == pg.MOUSEWHEEL:
             player.updateVoxelType(event.y)
 
+        if event.type == pg.KEYDOWN:
+            if event.key == pg.K_e:
+                WIREFRAME = not WIREFRAME
+    
 
     keys = pg.key.get_pressed()
 
     if keys[pg.K_ESCAPE]:
         running = False
     
-    player.move(keys, 1/delta)
+    # Requirement - FP5
+    player.move(keys, delta)
     player.placeVoxels()
 
     world.update(player)
@@ -521,7 +682,7 @@ while running:
     # Render
     screen.fill(SKY_COLOR)
     renderer.render(world.mesh)
-    pg.display.set_caption(f"Fps: {fps}")
+    pg.display.set_caption(f"Voxel Game: {world.name}")
 
     pg.display.flip()
     clock.tick(MAX_FPS)

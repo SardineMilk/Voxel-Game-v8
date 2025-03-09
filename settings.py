@@ -5,13 +5,15 @@ from perlin_noise import PerlinNoise
 from numba import njit, prange
 from random import randint
 
+import mysql.connector
+
 # Debug tools
 GRAB_MOUSE = True  # Hide the mouse and lock it to the centre of the window
 WIREFRAME = False # Render a wireframe instead of the filled faces
 INSERTION_SORT = False
 
 # Window
-WIDTH, HEIGHT =  1080, 1080
+WIDTH, HEIGHT =  1000, 1000
 CENTRE = (WIDTH//2, HEIGHT//2)
 ASPECT_RATIO = WIDTH / HEIGHT
 MAX_FPS = 120    
@@ -74,8 +76,6 @@ voxel_types = [
 
 def clamp(n, minn, maxn):
     return max(minn, min(n, maxn))
-
-
 
 def toFlat(position):
     """
