@@ -3,16 +3,15 @@ from settings import *
 
 class Camera:
     def __init__(self, starting_position: pg.Vector3, starting_rotation: pg.Vector3):
-        self.position = pg.Vector3(starting_position)
-        self.rotation = pg.Vector3(starting_rotation)
+        self.position = pg.Vector3(starting_position)  #(x, y, z)
+        self.rotation = pg.Vector3(starting_rotation)  #(yaw, pitch, roll)
     
     def move(self, keys, delta):
         # Requirement - U3
         # Requirement - FI1
 
-
-        delta = 1/delta
-        speed = PLAYER_SPEED / (delta*1000)
+        delta_factor = (1/delta)*1000
+        speed = PLAYER_SPEED / (delta_factor)
         yaw = math.radians(self.rotation.x)
 
         if keys[pg.K_w]:  # Move forward
@@ -47,18 +46,24 @@ class Camera:
     
 
 class World:
-    def __init__(self, name):
+    def __init__(self, name, chunk_size):
         self.name = name
         self.chunks = []
-        self.changed = True  # If any chunk meshes have changed, we set this to tre
+        self.changed = True  # Flag to reconstruct mesh - set to true if any chunk meshes are changed
+
+    def updateVoxelList(self):
+
+        raw_voxel_list = database.fetchVoxelTypes()
 
     def getVoxel(self, position):
+        # Get the voxel type at a specific world position
         chunk_position, local_position = self.__worldToLocal(position)
         chunk = self.__getChunk(chunk_position)
         voxel = chunk.getVoxel(local_position)
         return voxel
 
     def setVoxel(self, position, type):
+        # Set the voxel type at a specific world position
         chunk_position, local_position = self.__worldToLocal(tuple(position))
         chunk = self.__getChunk(chunk_position)
         chunk.setVoxel(local_position, type)
@@ -98,6 +103,7 @@ class World:
                 self.changed = True
                 self.unloadChunk(chunk.position)
 
+        # Load needed chunks that are currently unloaded
         for chunk_position in chunks_to_load:
             if self.__getChunkIndex(list(chunk_position)) == None:
                 # If the chunk is not loaded, we load it
@@ -105,6 +111,7 @@ class World:
                 self.loadChunk(chunk_position)
 
     def constructMesh(self):
+        # Build the world mesh from existing chunk meshes
         mesh = []
         for chunk in self.chunks:
             mesh += chunk.mesh
@@ -119,6 +126,7 @@ class World:
             # So it will be the last item in the list
             return self.chunks[-1]
 
+        # Return the requested chunk
         return self.chunks[chunk_index]
 
     def __getChunkIndex(self, position):
@@ -145,6 +153,7 @@ class World:
             file_name = self.__getFilePath(str(tuple(position)))+".npy"
             voxels = np.load(file_name)
         except OSError:
+            # If the file does not exist, generate a new chunk
             voxels = terrain_generator.generateChunk(position)
 
         self.chunks.append(Chunk(position, voxels))
@@ -173,9 +182,8 @@ class Chunk:
         self.constructMesh()
     
     def getVoxel(self, position):
-        """
-        Fetch the voxel data at an (x, y, z) position in the chunk
-        """
+        # Fetch the voxel data at an (x, y, z) position in the chunk
+
         x, y, z = position
         # Range check - If it's outside the chunk, we return 0
         if ((0 <= x < CHUNK_SIZE) and
@@ -188,10 +196,8 @@ class Chunk:
         return 0  # If position is outside chunk, assume it's empty to prevent holes in the terrain
     
     def setVoxel(self, position, type):
-        """
-        Set the voxel data at an (x, y, z) position in the chunk
-        Then rebuild the chunk mesh
-        """
+        # Set the voxel data at an (x, y, z) position in the chunk
+        # Then rebuild the chunk mesh
 
         x, y, z = position
         # Range check - Is it inside the chunk?
@@ -203,14 +209,9 @@ class Chunk:
                 self.constructMesh()
 
     def constructMesh(self):
-        """
-        This constructs the chunk mesh
-        It takes the form of a list, with each element being a Face object
-
-        The face_index determines which side of the voxel the face belongs to, with the lookup table stored in settings.py
-
-
-        """
+        # This constructs the chunk mesh
+        # It takes the form of a list, with each element being a Face object
+        # The face_index determines which side of the voxel the face belongs to, with the lookup table stored in settings.py
 
         chunk_offset = pg.Vector3(self.position)*CHUNK_SIZE
 
@@ -246,12 +247,23 @@ class Renderer:
             - Projecting
         - Drawing the mesh
 
+    It then renders the UI involving:
+        - Crosshair
+        - FPS
+        - Held voxel indicator
     """
-    def __init__(self, surface):
-        # The surface the renderer will draw on
-        self.surface = surface
+    def __init__(self, surface, sky_colour):
+        self.surface = surface  # The surface the renderer will draw on
+        self.sky_colour = sky_colour  # The background colour
     
     def render(self, mesh):
+        self.surface.fill(SKY_COLOR)
+
+        self.renderMesh(mesh)
+
+        self.renderUI()
+
+    def renderMesh(self, mesh):
         """
         Process the mesh, then draw it on the screen
         """
@@ -268,12 +280,11 @@ class Renderer:
         else:
             sorted_mesh = sorted(processed_mesh, key=lambda x: x[2])[::-1]
 
-
         for face in sorted_mesh:
             # Requirement - FO1
             pg.draw.polygon(self.surface, face[1], face[0], width=WIREFRAME)
-
-        self.renderUI()
+            if OUTLINE:
+                gfxdraw.aapolygon(self.surface, face[0], (0, 0, 0))
 
     def renderUI(self):
         # Requirement - U6
@@ -283,8 +294,8 @@ class Renderer:
         pg.draw.circle(self.surface,  (255, 255, 255), CENTRE, 1)
 
         # Held Voxel
-        pg.draw.rect(self.surface, (0, 0, 0), ((0, HEIGHT-102), (102, 102)), 2)
-        pg.draw.rect(self.surface, voxel_types[player.voxel_type-1], ((0, HEIGHT-100), (100, 100)))
+        pg.draw.rect(self.surface, (0, 0, 0), ((0, HEIGHT-127), (127, 127)), 2)
+        pg.draw.rect(self.surface, world.voxel_types[player.voxel_type-1], ((0, HEIGHT-125), (125, 125)))
 
         # FPS text
         text = font.render(f"FPS: {str(fps)}", True, (255, 255, 255))
@@ -311,8 +322,9 @@ class Face:
         """
         self.position = position  # (x,y,z) of the origin of the face
         self.normal = FACE_NORMALS[index]  # Index of the face - Indexes into FACE_NORMALS
-        self.colour = voxel_types[type - 1]
         self.__index = index
+
+        self.colour = world.voxel_types[type - 1][0:3]
 
         self.mesh = self.__generateMesh()
 
@@ -334,11 +346,14 @@ class Face:
 
 
 class TerrainGenerator:
+    def __init__(self, seed):
+        self.seed = seed
+        
     def sample(self, position):
         if position[1] == 0:
             voxel_type = (math.sqrt(((position[0]*CHUNK_SIZE)**2)+
                             ((position[2]*CHUNK_SIZE)**2))//2
-                ) %3+1
+                ) %len(world.voxel_types)+1
             return voxel_type
         else:
             return 0
@@ -371,11 +386,11 @@ class Player(Camera):
             self.voxel_type += mouse_wheel_y
 
             # If it goes out of bounds, loop to the other end of list
-            if self.voxel_type > len(voxel_types) - 1:
+            if self.voxel_type > len(world.voxel_types) - 1:
                 self.voxel_type = 1
             if self.voxel_type < 1:
                 # 1 is used because 0 is empty, bound to left click
-                self.voxel_type = len(voxel_types) - 1
+                self.voxel_type = len(world.voxel_types) - 1
     
     def placeVoxels(self):
         # Requirement - U1
@@ -383,24 +398,22 @@ class Player(Camera):
         # Voxel Placing - TODO complete
         placing_pos = (int(self.position.x), int(self.position.y), int(self.position.z))
         # Requirement - FI3
-        if pg.mouse.get_pressed()[2]:
+        if pg.mouse.get_pressed()[2]:  # Right click
             world.setVoxel(placing_pos , self.voxel_type)
         # Requirement - FI3
-        if pg.mouse.get_pressed()[0]:
+        if pg.mouse.get_pressed()[0]:  # Left click
             world.setVoxel(placing_pos, 0)
 
 
 class DatabaseManager:
-    def __init__(self, world_name):
-        self.world_name = world_name
-
+    def connectToWorldsDatabase(self):
         # Attempt to connect to worlds database
         self.worlds_database = self.__connectToDatabase("WorldsData", self.createNewWorldsDatabase)
 
+    def connectToVoxelsDatabase(self, world_name):
         # Attempt to connect to voxels database
         self.voxels_database = self.__connectToDatabase(f"{self.world_name}_VoxelsData", self.createNewVoxelsDatabase)
 
-        
     def __connectToDatabase(self, database_name, create_database_func):
         retry_attempts = 3
         for i in range(retry_attempts):
@@ -421,7 +434,7 @@ class DatabaseManager:
 
         raise Exception(f"Failed to connect to {database_name} after {retry_attempts} attempts")
 
-    def fetchWorld(self):
+    def fetchWorld(self, world_name):
         with self.worlds_database.cursor() as worlds_cursor:
             worlds_cursor.execute("SELECT * FROM worlds WHERE world_name = %s", 
                                 (self.world_name,))
@@ -488,7 +501,6 @@ class DatabaseManager:
 
     def createNewVoxelsDatabase(self):
         database_name = f"{self.world_name}_VoxelsData"
-
         try:
             mysql_connection = mysql.connector.connect(
                 host="localhost",
@@ -619,7 +631,125 @@ def projectVertex(vertex):
     return projected_x, projected_y
 
 
+def inputNewVoxel():
+    # Unlock the mouse
+    pg.mouse.set_visible(True)
+    pg.event.set_grab(False)
 
+    inputWindow = tk.Tk()
+    inputWindow.title("Add New Voxel")
+
+    # Inputs
+    tk.Label(inputWindow, text="Red Value (0-255):").pack(pady=2)
+    r_entry = tk.Entry(inputWindow, width=30)
+    r_entry.pack(pady=2)
+
+    tk.Label(inputWindow, text="Green Value (0-255):").pack(pady=2)
+    g_entry = tk.Entry(inputWindow, width=30)
+    g_entry.pack(pady=2)
+
+    tk.Label(inputWindow, text="Blue Value (0-255):").pack(pady=2)
+    b_entry = tk.Entry(inputWindow, width=30)
+    b_entry.pack(pady=2)
+
+    transparent_bool = tk.BooleanVar()
+    tk.Label(inputWindow, text="Is the voxel transparent?").pack(pady=2)
+    transparent_checkbox = tk.Checkbutton(inputWindow, text="Transparent?", variable=transparent_bool)
+    transparent_checkbox.pack(pady=2)
+
+    def submit():
+        # This repeats until a valid input is detected
+        try:
+            # Get the rgb values
+            # This raises an error if any are null
+            r = int(r_entry.get())
+            g = int(g_entry.get())
+            b = int(b_entry.get())
+
+            # Validate all rgb values are in range
+            if not (0 <= r <= 255):
+                raise ValueError("Red value must be between 0 and 255.")
+            if not (0 <= g <= 255):
+                raise ValueError("Green value must be between 0 and 255.")
+            if not (0 <= b <= 255):
+                raise ValueError("Blue value must be between 0 and 255.")
+
+            transparent = transparent_bool.get()
+
+            print((r, g, b), transparent)
+            #database.addVoxelType((r, g, b), transparent)
+
+            inputWindow.destroy()  # Close the window after successful input
+
+        except ValueError as e:
+            print(f"Invalid Input: {str(e)}")
+
+    # Submit Button
+    submit_button = tk.Button(inputWindow, text="Submit", command=submit)
+    submit_button.pack(pady=10)
+
+    inputWindow.mainloop()
+
+    # Lock the mouse again
+    pg.mouse.set_visible(False)
+    pg.event.set_grab(True)
+
+    # Update the world's list of voxels
+    world.updateVoxelList()
+
+
+def getWorld():
+    # Unlock the mouse
+    pg.mouse.set_visible(True)
+    pg.event.set_grab(False)
+
+    inputWindow = tk.Tk()
+    inputWindow.title("Open/Create World")
+
+    # Inputs
+    tk.Label(inputWindow, text="Enter the world name:").pack(pady=2)
+    world_entry = tk.Entry(inputWindow, width=30)
+    world_entry.pack(pady=2)
+
+
+    def submit():
+        # This repeats until a valid input is detected
+        try:
+            world_name = world_entry.get()
+
+            # Validate the world_name is the correct length
+            if not (1 <= len(world_name) <= 20):
+                raise ValueError("World name must be between 1 and 20 characters")
+
+            inputWindow.destroy()  # Close the window after successful input
+
+        except ValueError as e:
+            print(f"Invalid Input: {str(e)}")
+
+    # Submit Button
+    submit_button = tk.Button(inputWindow, text="Submit", command=submit)
+    submit_button.pack(pady=10)
+
+    inputWindow.mainloop()
+
+    # Lock the mouse again
+    pg.mouse.set_visible(False)
+    pg.event.set_grab(True)
+
+    # Get the world if possible, or create new world
+    try:
+        world = database.fetchWorld(world_name)
+        print(f"Fetched world {world_name}")
+    except:
+        print(f"Could not fetch world {world_name}")
+        print("Creating new world")
+        database.addWorld(world_name, 16, (SKY_COLOR), 1)
+        world = database.fetchWorld(world_name)
+
+
+    world_id, world_name, chunk_size, sky_r, sky_g, sky_b, world_seed = world
+
+    return world_name, chunk_size, (sky_r, sky_g, sky_b), world_seed
 
 pg.init()
 
@@ -631,20 +761,28 @@ font = pg.font.Font(None, 24)
 clock = pg.time.Clock()
 previous_time = 0
 
+database = DatabaseManager()  # Requirement - FP3
+database.connectToWorldsDatabase()  # The Worlds database is needed for the getWorld() function
+world_name, chunk_size, sky_colour, world_seed = getWorld()
+database.connectToVoxelsDatabase(world_name)
+
 player = Player((0, -2, 0), (0, 0, 0)) # Requirement - FP2
-world = World(world_name)
-renderer = Renderer(screen)
-terrain_generator = TerrainGenerator()
-# database = DatabaseManager()  # Requirement - FP3
+renderer = Renderer(screen, sky_colour)
+world = World(world_name, chunk_size)
+terrain_generator = TerrainGenerator(world_seed)
 
+world.updateVoxelList()
+if len(world.voxel_list) == 0:
+    inputNewVoxel()
 
-# Mouse lock>>
+pg.display.set_caption(f"Voxel Game: {world.name}")
+
+# Mouse lock
 if GRAB_MOUSE:
     pg.mouse.set_visible(False)
     pg.event.set_grab(True)
 
 running = True
-# and previous_time <= 5000
 while running:
     # Time and frame rate
     current_time = pg.time.get_ticks()
@@ -659,17 +797,20 @@ while running:
             relative_mouse_movement = event.rel
             player.rotate(relative_mouse_movement, delta)
 
-        # Voxel Type 
+        # Voxel Type - Changes with scroll wheel
         if event.type == pg.MOUSEWHEEL:
             player.updateVoxelType(event.y)
 
         if event.type == pg.KEYDOWN:
             if event.key == pg.K_e:
                 WIREFRAME = not WIREFRAME
-    
+            
+            if event.key == pg.K_r:
+                inputNewVoxel()
 
     keys = pg.key.get_pressed()
 
+    # Quit the game if the escape key is pressed
     if keys[pg.K_ESCAPE]:
         running = False
     
@@ -680,14 +821,12 @@ while running:
     world.update(player)
 
     # Render
-    screen.fill(SKY_COLOR)
     renderer.render(world.mesh)
-    pg.display.set_caption(f"Voxel Game: {world.name}")
 
     pg.display.flip()
     clock.tick(MAX_FPS)
 
-
+# Unloading the chunks saves them to file, meaning the game autosaves whenever you quit
 for chunk in world.chunks:
     world.unloadChunk(chunk.position)
 
