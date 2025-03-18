@@ -52,8 +52,11 @@ class World:
         self.changed = True  # Flag to reconstruct mesh - set to true if any chunk meshes are changed
 
     def updateVoxelList(self):
-
         raw_voxel_list = database.fetchVoxelTypes()
+
+        self.voxel_types = []
+        for raw_voxel in raw_voxel_list:
+            self.voxel_types.append(raw_voxel[1:4])
 
     def getVoxel(self, position):
         # Get the voxel type at a specific world position
@@ -291,7 +294,7 @@ class Renderer:
         # Requirement - FO2
 
         # Crosshair
-        pg.draw.circle(self.surface,  (255, 255, 255), CENTRE, 1)
+        pg.draw.circle(self.surface,  (255, 255, 255), CENTRE, 1)        
 
         # Held Voxel
         pg.draw.rect(self.surface, (0, 0, 0), ((0, HEIGHT-127), (127, 127)), 2)
@@ -324,7 +327,7 @@ class Face:
         self.normal = FACE_NORMALS[index]  # Index of the face - Indexes into FACE_NORMALS
         self.__index = index
 
-        self.colour = world.voxel_types[type - 1][0:3]
+        self.colour = world.voxel_types[type - 1]
 
         self.mesh = self.__generateMesh()
 
@@ -353,7 +356,7 @@ class TerrainGenerator:
         if position[1] == 0:
             voxel_type = (math.sqrt(((position[0]*CHUNK_SIZE)**2)+
                             ((position[2]*CHUNK_SIZE)**2))//2
-                ) %len(world.voxel_types)+1
+                ) % (len(world.voxel_types)) + 1
             return voxel_type
         else:
             return 0
@@ -386,11 +389,11 @@ class Player(Camera):
             self.voxel_type += mouse_wheel_y
 
             # If it goes out of bounds, loop to the other end of list
-            if self.voxel_type > len(world.voxel_types) - 1:
+            if self.voxel_type > len(world.voxel_types):
                 self.voxel_type = 1
             if self.voxel_type < 1:
                 # 1 is used because 0 is empty, bound to left click
-                self.voxel_type = len(world.voxel_types) - 1
+                self.voxel_type = len(world.voxel_types) 
     
     def placeVoxels(self):
         # Requirement - U1
@@ -412,7 +415,7 @@ class DatabaseManager:
 
     def connectToVoxelsDatabase(self, world_name):
         # Attempt to connect to voxels database
-        self.voxels_database = self.__connectToDatabase(f"{self.world_name}_VoxelsData", self.createNewVoxelsDatabase)
+        self.voxels_database = self.__connectToDatabase(f"{world_name}_VoxelsData", self.createNewVoxelsDatabase)
 
     def __connectToDatabase(self, database_name, create_database_func):
         retry_attempts = 3
@@ -437,8 +440,14 @@ class DatabaseManager:
     def fetchWorld(self, world_name):
         with self.worlds_database.cursor() as worlds_cursor:
             worlds_cursor.execute("SELECT * FROM worlds WHERE world_name = %s", 
-                                (self.world_name,))
+                                (world_name,))
             result = worlds_cursor.fetchall()
+
+        # Raise an exception if the world doesn't exist
+        # This means other functions can create a new world rather than using the empty list
+        if len(result) == 0:
+            raise Exception(f"{world_name} does not exist")
+
         return result
 
     def fetchVoxelTypes(self):
@@ -450,92 +459,100 @@ class DatabaseManager:
 
     def addWorld(self, world_name, chunk_size, sky_colour, world_seed):
         with self.worlds_database.cursor() as worlds_cursor:
-            worlds_cursor.execute("INSERT INTO worlds (world_name, chunk_size, sky_colour_r, sky_colour_g, sky_colour_b, world_seed) VALUES (%s, %d, %d, %d, %d, %d)",
-                                    (world_name, 16, chunk_size, sky_colour[0], sky_colour[1], sky_colour[2], world_seed ))
-        pass
+            worlds_cursor.execute("INSERT INTO worlds (world_name, chunk_size, sky_colour_r, sky_colour_g, sky_colour_b, world_seed) VALUES (%s, %s, %s, %s, %s, %s)",
+                                    (world_name, chunk_size, sky_colour[0], sky_colour[1], sky_colour[2], world_seed))
 
     def addVoxelType(self, voxel_colour, transparent):
         # Append a new voxel type to the database
         with self.voxels_database.cursor() as voxels_cursor:
-            voxels_cursor.execute("INSERT INTO voxel_types (red, green, blue, transparent) VALUES (%d, %d, %d, %b)", 
+            voxels_cursor.execute("INSERT INTO voxel_types (red, green, blue, transparent) VALUES (%s, %s, %s, %s)", 
                                 (voxel_colour[0], voxel_colour[1], voxel_colour[2], transparent))
-            self.voxels_database.commit()
 
     def createNewWorldsDatabase(self):
         try:
+            # Connect to MySQL server (generic, not any specific database)
             mysql_connection = mysql.connector.connect(
                 host="localhost",
                 user="root",
                 password="root"
             )
-
-            with mysql_connection.cursor() as cursor:
-                cursor.execute("CREATE DATABASE IF NOT EXISTS WorldsData")
-            mysql_connection.commit()
-            mysql_connection.close()
-
+            cursor = mysql_connection.cursor()
+            
+            # Create database
+            cursor.execute("CREATE DATABASE IF NOT EXISTS WorldsData")
+            
+            # Connect to the new database
+            mysql_connection.database = "WorldsData"
+            
             # Create Worlds Table
-            worlds_connection = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="root",
-                database="WorldsData"
-            )
-            with worlds_connection.cursor() as cursor:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS worlds (
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS worlds (
                     world_id INT AUTO_INCREMENT PRIMARY KEY,
-                    world_name VARCHAR NOT NULL,
+                    world_name VARCHAR(20) NOT NULL,
                     chunk_size INT NOT NULL,
                     sky_colour_r INT NOT NULL,
                     sky_colour_g INT NOT NULL,
                     sky_colour_b INT NOT NULL,
                     world_seed INT NOT NULL
-                    )
-                """)
-            worlds_connection.commit()
-            worlds_connection.close()
+                )""")
             
+            # Commit connection
+            mysql_connection.commit()
+
         except mysql.connector.Error as e:
             print(f"Error creating WorldsData database: {e}")
+        
+        finally:
+            if mysql_connection.is_connected():
+                cursor.close()
+                mysql_connection.close()
+
 
     def createNewVoxelsDatabase(self):
         database_name = f"{self.world_name}_VoxelsData"
+
         try:
+            # Connect to MySQL server (generic, not any specific database)
             mysql_connection = mysql.connector.connect(
                 host="localhost",
                 user="root",
                 password="root"
             )
-
-            with mysql_connection.cursor() as cursor:
-                cursor.execute(f"CREATE DATABASE IF NOT EXISTS {database_name}")
-            mysql_connection.commit()
-            mysql_connection.close()       
-
+            cursor = mysql_connection.cursor()
+            
+            # Create database
+            cursor.execute(f"CREATE DATABASE IF NOT EXISTS {database_name}")
+            
+            # Connect to the new database
+            mysql_connection.database = database_name
+            
             # Create Voxels Table
-            voxels_connection = mysql.connector.connect(
-                host="localhost",
-                user="root",
-                password="root",
-                database=database_name
-            )
-            with voxels_connection.cursor() as cursor:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS voxel_types (
-                        voxel_id INT AUTO_INCREMENT PRIMARY KEY,
-                        red INT NOT NULL,
-                        green INT NOT NULL,
-                        blue INT NOT NULL,
-                        transparent BOOLEAN NOT NULL
-                    )
-                """)
-            voxels_connection.commit()
-            voxels_connection.close()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS voxel_types (
+                    voxel_id INT AUTO_INCREMENT PRIMARY KEY,
+                    red INT NOT NULL,
+                    green INT NOT NULL,
+                    blue INT NOT NULL,
+                    transparent BOOLEAN NOT NULL
+                )""")
+            
+            # Commit connection
+            mysql_connection.commit()
 
         except mysql.connector.Error as e:
             print(f"Error creating {database_name} database: {e}")
-    
+
+        finally:
+            if mysql_connection.is_connected():
+                cursor.close()
+                mysql_connection.close()
+
+    def close(self):
+        self.worlds_database.commit()
+        self.worlds_database.close()
+
+        self.voxels_database.commit()
+        self.voxels_database.close()
 
 def processMesh(mesh, camera_position, camera_rotation):
     # Using the mesh, return a list of faces that must be drawn
@@ -676,8 +693,7 @@ def inputNewVoxel():
 
             transparent = transparent_bool.get()
 
-            print((r, g, b), transparent)
-            #database.addVoxelType((r, g, b), transparent)
+            database.addVoxelType((r, g, b), transparent)
 
             inputWindow.destroy()  # Close the window after successful input
 
@@ -708,14 +724,15 @@ def getWorld():
 
     # Inputs
     tk.Label(inputWindow, text="Enter the world name:").pack(pady=2)
-    world_entry = tk.Entry(inputWindow, width=30)
+    world_var = tk.StringVar()
+    world_entry = tk.Entry(inputWindow, textvariable=world_var, width=30)
     world_entry.pack(pady=2)
 
 
     def submit():
         # This repeats until a valid input is detected
         try:
-            world_name = world_entry.get()
+            world_name = world_var.get().strip()
 
             # Validate the world_name is the correct length
             if not (1 <= len(world_name) <= 20):
@@ -732,6 +749,8 @@ def getWorld():
 
     inputWindow.mainloop()
 
+    world_name = world_var.get().strip()
+
     # Lock the mouse again
     pg.mouse.set_visible(False)
     pg.event.set_grab(True)
@@ -746,8 +765,7 @@ def getWorld():
         database.addWorld(world_name, 16, (SKY_COLOR), 1)
         world = database.fetchWorld(world_name)
 
-
-    world_id, world_name, chunk_size, sky_r, sky_g, sky_b, world_seed = world
+    world_id, world_name, chunk_size, sky_r, sky_g, sky_b, world_seed = world[0]
 
     return world_name, chunk_size, (sky_r, sky_g, sky_b), world_seed
 
@@ -764,6 +782,7 @@ previous_time = 0
 database = DatabaseManager()  # Requirement - FP3
 database.connectToWorldsDatabase()  # The Worlds database is needed for the getWorld() function
 world_name, chunk_size, sky_colour, world_seed = getWorld()
+database.world_name = world_name
 database.connectToVoxelsDatabase(world_name)
 
 player = Player((0, -2, 0), (0, 0, 0)) # Requirement - FP2
@@ -772,7 +791,7 @@ world = World(world_name, chunk_size)
 terrain_generator = TerrainGenerator(world_seed)
 
 world.updateVoxelList()
-if len(world.voxel_list) == 0:
+if len(world.voxel_types) == 0:
     inputNewVoxel()
 
 pg.display.set_caption(f"Voxel Game: {world.name}")
@@ -829,5 +848,7 @@ while running:
 # Unloading the chunks saves them to file, meaning the game autosaves whenever you quit
 for chunk in world.chunks:
     world.unloadChunk(chunk.position)
+
+database.close()
 
 pg.quit()
