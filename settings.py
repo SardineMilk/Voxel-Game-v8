@@ -1,12 +1,12 @@
 import pygame as pg
 import numpy as np
 import math
-from perlin_noise import PerlinNoise
 from numba import njit, prange
 from random import randint
 from pygame import gfxdraw
 import mysql.connector
 import tkinter as tk
+import os
 
 # Debug tools
 GRAB_MOUSE = True  # Hide the mouse and lock it to the centre of the window

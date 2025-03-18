@@ -166,6 +166,11 @@ class World:
         # Unload a chunk, saving it to file
         chunk = self.__getChunk(position)
 
+        # If the folder to save in doesn't exist,
+        if not os.path.exists(self.name):
+            # Create it
+            os.makedirs(self.name)
+
         file_name = self.__getFilePath(str(tuple(position)))
         np.save(file_name, chunk.voxels)
 
