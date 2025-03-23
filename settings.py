@@ -10,8 +10,8 @@ import os
 
 # Debug tools
 GRAB_MOUSE = True  # Hide the mouse and lock it to the centre of the window
-WIREFRAME = False # Render a wireframe instead of the filled faces
-INSERTION_SORT = False
+WIREFRAME = False  # Render a wireframe instead of the filled faces
+INSERTION_SORT = True  # Change from Insertion Sort to np.argsort()
 
 # Window
 WIDTH, HEIGHT =  1000, 1000

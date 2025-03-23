@@ -150,7 +150,7 @@ class World:
 
     def constructMesh(self):
         # Requirement - FP8
-        
+
         # Build the world mesh from existing chunk meshes
         mesh = []
         for chunk in self.chunks:
@@ -414,7 +414,7 @@ class Renderer:
         for i in range(1, len(mesh)):
             j = i
             temp = mesh[i]
-            while j >= 0 and mesh[j-1][2] < temp[2]:
+            while j > 0 and mesh[j-1][2] < temp[2]:
                 mesh[j] = mesh[j-1]
                 j -= 1
             mesh[j] = temp
