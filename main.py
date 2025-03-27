@@ -108,13 +108,13 @@ class World:
 
     def update(self, camera):
         # Update loaded chunks based on player position
-        self.updateRenderedChunks(camera.position)  # Requirement - FP7
+        self.__updateRenderedChunks(camera.position)  # Requirement - FP7
         # Reconstruct mesh if needed
         if self.changed:
-            self.constructMesh()  # Requirement - FP8
+            self.__constructMesh()  # Requirement - FP8
         self.changed = False
 
-    def updateRenderedChunks(self, player_pos):
+    def __updateRenderedChunks(self, player_pos):
         # Requirement - U5
         # Requirement - FP7
 
@@ -148,7 +148,7 @@ class World:
                 self.changed = True
                 self.loadChunk(chunk_position)
 
-    def constructMesh(self):
+    def __constructMesh(self):
         # Requirement - FP8
 
         # Build the world mesh from existing chunk meshes
@@ -519,7 +519,6 @@ class DatabaseManager:
             if mysql_connection.is_connected():
                 cursor.close()
                 mysql_connection.close()
-
 
     def createNewVoxelsDatabase(self):
         database_name = f"{self.world_name}_VoxelsData"
